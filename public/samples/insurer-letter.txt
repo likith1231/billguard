@@ -1,0 +1,18 @@
+NORTHSTAR HEALTH INSURANCE (SAMPLE — FICTITIOUS)
+Claim Settlement Letter
+Claim No: CLM-26-0918-3341      Policy No: NSH/2023/448812
+Insured: Ananya Rao             Hospital: Sunrise Multispeciality Hospital
+
+Amount claimed:                                 Rs 1,73,500
+Deductions:
+  1. Proportionate deduction on associated medical expenses     Rs 41,933
+     Reason: Room rent eligibility of Rs 5,000/day exceeded; proportionate
+     deduction applied on associated medical expenses (surgery package, OT,
+     anaesthesia, CBC, CT abdomen, ceftriaxone, paracetamol IV).
+  2. Room rent in excess of eligibility                          Rs 12,500
+     Reason: Room rent above eligible limit of Rs 5,000/day.
+  3. Non-medical items (gloves, admission kit)                   Rs  2,380
+     Reason: Non-medical items as per IRDAI list of non-payable items.
+  4. Co-payment 10%                                              Rs 11,669
+     Reason: Co-payment as per policy terms.
+Amount approved:                                Rs 1,03,518

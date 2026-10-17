@@ -1,0 +1,28 @@
+SUNRISE MULTISPECIALITY HOSPITAL (SAMPLE — FICTITIOUS)
+Final In-Patient Bill                                   Bill No: SMH/IP/26/07712
+Patient: Ananya Rao   Age/Sex: 34 / F   UHID: SMH-554120
+Admission: 11-Aug-2026 09:40   Discharge: 14-Aug-2026 11:15
+Diagnosis: Acute appendicitis — Laparoscopic appendectomy
+Payer: Northstar Health Insurance (cashless)   Policy No: NSH/2023/448812
+
+Date        Code        Description                                   Qty   Rate      MRP     Amount
+11-Aug-26   RM-PVT      Private Room (Single AC) — bed charges          5   7,500.00      -   37,500.00
+12-Aug-26   PKG-LAPAPP  Laparoscopic Appendectomy — all-inclusive pkg   1  85,000.00      -   85,000.00
+12-Aug-26   OT-01       Operation theatre charges                       1  18,000.00      -   18,000.00
+12-Aug-26   ANS-01      Anaesthetist fee                                1  12,000.00      -   12,000.00
+12-Aug-26   CON-GS      Consultation — Dr. M. Iyer (General Surgery)    1   1,200.00      -    1,200.00
+12-Aug-26   CON-GS      Consultation — Dr. M. Iyer (General Surgery)    1   1,200.00      -    1,200.00
+11-Aug-26   LAB-CBC     Complete Blood Count (CBC)                      1   1,350.00      -    1,350.00
+11-Aug-26   RAD-CTA     CT Abdomen with contrast                        1   7,800.00      -    7,800.00
+12-Aug-26   PH-CTX1     Inj. Ceftriaxone 1g                             6      95.00  68.00      570.00
+12-Aug-26   PH-PCM      Paracetamol IV infusion 1g/100ml                6     180.00 190.00    1,080.00
+12-Aug-26   PH-NS500    Normal Saline 0.9% 500ml                       10      48.00  52.00      520.00
+12-Aug-26   CS-GLV      Surgical gloves (pair)                         40      22.00      -      880.00
+11-Aug-26   NUR-01      Nursing charges                                 3   1,500.00      -    4,500.00
+11-Aug-26   ADM-KIT     Admission kit                                   1   1,500.00      -    1,500.00
+11-Aug-26   CAR-ECG     ECG 12 lead                                     1     400.00      -      400.00
+                                                                                GRAND TOTAL  1,73,500.00
+
+Package note (PKG-LAPAPP): Package includes OT charges, surgeon & anaesthetist fees,
+OT consumables and standard medicines during surgery.
+Room tariff note: Room tariff includes nursing care, RMO visits and bed linen.
