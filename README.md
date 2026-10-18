@@ -78,6 +78,17 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
 | 🤖 **AI vs Rule badges** | You can see whether a finding came from Claude's reading or the deterministic rules engine |
 | 📑 **Line-item table** | Every extracted line, with flagged rows highlighted and linked to their findings |
 | 🌊 **Settlement waterfall** | Claimed → each deduction → approved, with disputed deductions marked |
+| 📤 **Export** | Findings and line items as Excel-ready CSV (UTF-8 ₹, formula-injection safe), or the full report as JSON |
+
+### 💸 Recovery plan
+
+| Feature | Description |
+|---|---|
+| 🥧 **Where your money went** | Bill split into insurer paid / recover from insurer / recover from hospital / genuinely yours, and how much your out-of-pocket drops if the selected points are upheld |
+| 📅 **Escalation timeline** | Real dates from the day you send the letter: insurer's 14-day grievance window → Bima Bharosa → Insurance Ombudsman (free, up to ₹50 lakh, within 1 year) → Consumer Commission (within 2 years) |
+| ⏱️ **Late-settlement interest** | Insurers must settle within 30 days of the last document; past that you're owed interest at bank rate + 2%. Calculator with editable dates, amount and RBI bank rate |
+| 💊 **NPPA routing** | Charges above MRP are flagged as reportable to NPPA's Pharma Jan Samadhan, separately from the refund |
+| 🗂️ **Paper-trail checklist** | The eight documents you need for an escalation, remembered per claim in your browser |
 
 ### ✉️ Dispute letters
 
@@ -110,6 +121,9 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
   <tr>
     <td width="50%"><img src="docs/screenshots/letter.png" alt="Dispute letter" /><p align="center"><b>Dispute letter</b>: drafted and editable</p></td>
     <td width="50%"><img src="docs/screenshots/checks.png" alt="Checks section" /><p align="center"><b>What we catch</b></p></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/plan.png" alt="Recovery plan" /><p align="center"><b>Recovery plan</b>: where the money went, escalation deadlines, late-settlement interest</p></td>
   </tr>
 </table>
 
@@ -256,7 +270,8 @@ billguard/
     ├── components/
     │   ├── three/Scene.tsx      # R3F scene: bill sheets, scan beam, glass shield
     │   ├── audit/               # Uploader, Scanning, Results, FindingCard,
-    │   │                        # LineTable, Settlement (waterfall), LetterPanel
+    │   │                        # LineTable, Settlement (waterfall), LetterPanel,
+    │   │                        # RecoveryPlan (money split, deadlines, interest)
     │   └── ui/                  # Background3D, TiltCard, Nav, Counter, Reveal, Logo
     └── lib/
         ├── schema.ts            # Zod schemas: line items, deductions, findings
@@ -265,6 +280,7 @@ billguard/
         ├── benchmarks.ts        # Indicative price bands
         ├── sample.ts            # Demo-mode sample case
         ├── letter-template.ts   # Demo-mode letter
+        ├── export.ts            # CSV / JSON exports
         └── format.ts            # Money & label helpers
 ```
 
@@ -313,6 +329,8 @@ billguard/
 - [ ] 🏥 Official CGHS / PPN / NPPA rate tables by city
 - [ ] 📄 Export the audit report as PDF
 - [ ] 📧 Send the letter by email directly from the app
+- [x] 📅 Escalation deadlines & late-settlement interest calculator
+- [x] 📤 CSV / JSON export
 - [ ] 🗃️ Save audits to an account and track dispute status
 - [ ] 🌐 Hindi and Kannada letters
 

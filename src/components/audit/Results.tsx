@@ -1,21 +1,24 @@
 "use client";
 
-import { FileText, ListChecks, RotateCcw, Table2, Wallet } from "lucide-react";
+import { Download, FileText, ListChecks, Route, RotateCcw, Table2, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import Counter from "@/components/ui/Counter";
 import TiltCard from "@/components/ui/TiltCard";
+import { download, findingsCsv, linesCsv } from "@/lib/export";
 import { money } from "@/lib/format";
 import { partyFor } from "@/lib/rules";
 import type { AuditResult } from "@/lib/schema";
 import FindingCard from "./FindingCard";
 import LetterPanel from "./LetterPanel";
 import LineTable from "./LineTable";
+import RecoveryPlan from "./RecoveryPlan";
 import Settlement from "./Settlement";
 
 const TABS = [
   { id: "findings", label: "Findings", icon: ListChecks },
   { id: "lines", label: "Line items", icon: Table2 },
   { id: "settlement", label: "Settlement", icon: Wallet },
+  { id: "plan", label: "Recovery plan", icon: Route },
 ] as const;
 
 export default function Results({ result, onReset }: { result: AuditResult; onReset: () => void }) {
@@ -40,6 +43,14 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
       else n.add(id);
       return n;
     });
+
+  const selectedTotal = result.findings.filter((f) => selected.has(f.id)).reduce((s, f) => s + Math.max(0, f.disputedAmount), 0);
+  const slug = (x.patient.claimNumber ?? x.hospital.billNumber ?? "audit").replace(/[^\w-]+/g, "-");
+  const exports = [
+    { label: "Findings CSV", on: () => download(`billguard-${slug}-findings.csv`, findingsCsv(result), "text/csv;charset=utf-8") },
+    { label: "Line items CSV", on: () => download(`billguard-${slug}-lines.csv`, linesCsv(result), "text/csv;charset=utf-8") },
+    { label: "Full report JSON", on: () => download(`billguard-${slug}.json`, JSON.stringify(result, null, 2), "application/json") },
+  ];
 
   const kpis = [
     { label: "Billed", value: result.totals.billed, tone: "text-ink" },
@@ -67,6 +78,26 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
           <a href="#letter" className="inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-sm font-semibold text-black hover:brightness-110">
             <FileText className="h-4 w-4" /> Draft letter
           </a>
+          <details className="relative">
+            <summary className="glass inline-flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5 [&::-webkit-details-marker]:hidden">
+              <Download className="h-4 w-4" /> Export
+            </summary>
+            <div className="glass-strong absolute right-0 z-20 mt-2 w-48 rounded-2xl p-1.5">
+              {exports.map((e) => (
+                <button
+                  key={e.label}
+                  type="button"
+                  onClick={(ev) => {
+                    e.on();
+                    ev.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                  className="block w-full rounded-xl px-3 py-2 text-left text-sm text-ink-2 hover:bg-white/5 hover:text-ink"
+                >
+                  {e.label}
+                </button>
+              ))}
+            </div>
+          </details>
           <button type="button" onClick={onReset} className="glass inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5">
             <RotateCcw className="h-4 w-4" /> New audit
           </button>
@@ -84,6 +115,11 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
             <p className="mt-2 text-xs text-muted">
               {result.findings.length} findings · {result.totals.flaggedLines} bill lines flagged
             </p>
+            {Math.abs(selectedTotal - result.totals.recoverable) > 0.5 && (
+              <p className="mt-1 text-xs text-mint/80">
+                {money(selectedTotal, cur)} selected to dispute ({selected.size} of {result.findings.length})
+              </p>
+            )}
           </div>
           <div className="pointer-events-none absolute -right-10 -bottom-16 h-40 w-40 rounded-full bg-mint/25 blur-3xl" />
         </TiltCard>
@@ -153,6 +189,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
           ))}
         {tab === "lines" && <LineTable result={result} />}
         {tab === "settlement" && <Settlement result={result} />}
+        {tab === "plan" && <RecoveryPlan result={result} selected={selected} />}
       </div>
 
       <LetterPanel result={result} selected={selected} setSelected={setSelected} />
