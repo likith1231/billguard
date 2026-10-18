@@ -2,9 +2,11 @@
 
 import { Check, Copy, Download, Landmark, Loader2, Printer, Receipt, Wand2 } from "lucide-react";
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { money } from "@/lib/format";
 import { partyFor } from "@/lib/rules";
 import type { AuditResult } from "@/lib/schema";
+import { printView } from "./ReportPrint";
 
 type Recipient = "insurer" | "hospital";
 
@@ -172,7 +174,7 @@ export default function LetterPanel({
 
         <div style={{ perspective: 1400 }}>
           <div
-            className="print-area relative min-h-[32rem] rounded-3xl border border-white/10 bg-[#f6f4ee] p-6 text-[#1b1d22] shadow-[0_40px_120px_-30px_rgba(77,255,181,0.35)] transition-transform duration-700 md:p-10"
+            className="relative min-h-[32rem] rounded-3xl border border-white/10 bg-[#f6f4ee] p-6 text-[#1b1d22] shadow-[0_40px_120px_-30px_rgba(77,255,181,0.35)] transition-transform duration-700 md:p-10"
             style={{ transform: text ? "rotateX(0deg)" : "rotateX(8deg) translateY(10px)" }}
           >
             {text ? (
@@ -181,7 +183,7 @@ export default function LetterPanel({
                   {[
                     { label: copied ? "Copied" : "Copy", icon: copied ? Check : Copy, on: copy },
                     { label: "Download", icon: Download, on: download },
-                    { label: "Print", icon: Printer, on: () => window.print() },
+                    { label: "Print", icon: Printer, on: () => printView("letter") },
                   ].map((b) => (
                     <button
                       key={b.label}
@@ -219,6 +221,7 @@ export default function LetterPanel({
           </div>
         </div>
       </div>
+      {createPortal(<pre className="print-letter hidden bg-white p-4 font-mono text-[11pt] leading-relaxed whitespace-pre-wrap text-black">{text}</pre>, document.body)}
     </section>
   );
 }

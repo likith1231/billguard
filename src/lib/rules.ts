@@ -179,6 +179,49 @@ export function runRules(x: Extraction): Finding[] {
     }));
   }
 
+  // 9. Co-pay deducted when the policy has none, or more than the policy's percentage.
+  const copay = x.policy.copayPercent;
+  for (const d of s.deductions) {
+    if (!/co-?pay/i.test(d.reasonGiven + " " + d.description) || copay === null || !s.claimedAmount) continue;
+    const base = s.claimedAmount - s.deductions.filter((o) => o !== d).reduce((t, o) => t + o.amount, 0);
+    const allowed = (base * copay) / 100;
+    if (d.amount - allowed <= Math.max(10, allowed * 0.01)) continue;
+    out.push(rule({
+      type: "copay_error",
+      severity: "high",
+      title: copay === 0 ? "Co-pay deducted, but the policy has no co-pay" : `Co-pay is more than the policy's ${copay}%`,
+      explanation:
+        copay === 0
+          ? `The insurer deducted ${money(d.amount)} as co-payment, but the policy schedule shows no co-pay.`
+          : `${copay}% of the admissible ${money(base)} is ${money(allowed)}, but ${money(d.amount)} was deducted.`,
+      evidence: [`${d.id}: "${d.reasonGiven}" — ${money(d.amount)}`, `Policy co-pay: ${copay}%`],
+      deductionIds: [d.id],
+      disputedAmount: fmt(d.amount - allowed),
+      lineIds: [],
+      action: `Ask the insurer to recompute deduction ${d.id} at the policy's co-pay rate.`,
+    }));
+  }
+
+  // 10. Room-rent deduction although every room line is within the policy's daily cap.
+  const cap = x.policy.roomRentLimitPerDay;
+  const rooms = x.lineItems.filter((l) => l.category === "room");
+  if (cap && rooms.length && rooms.every((l) => l.unitPrice <= cap * 1.001)) {
+    for (const d of s.deductions) {
+      if (!/room/i.test(d.reasonGiven + " " + d.description)) continue;
+      out.push(rule({
+        type: "wrongful_deduction",
+        severity: "high",
+        title: "Room-rent deduction although the room was within the limit",
+        explanation: `Your policy allows ${money(cap)} a day and the bill charges at most ${money(Math.max(...rooms.map((l) => l.unitPrice)))} a day, so no room-rent deduction (proportionate or otherwise) should apply.`,
+        evidence: [`${d.id}: "${d.reasonGiven}" — ${money(d.amount)}`, ...rooms.map((l) => `${l.id}: ${l.description} @ ${l.unitPrice}/day`)],
+        deductionIds: [d.id],
+        disputedAmount: fmt(d.amount),
+        lineIds: rooms.map((l) => l.id),
+        action: `Ask the insurer to reverse deduction ${d.id} in full.`,
+      }));
+    }
+  }
+
   return out;
 }
 
@@ -190,22 +233,39 @@ const INSURER_TYPES = new Set<Finding["type"]>([
   "policy_violation",
 ]);
 
+// Billing errors only the hospital can fix, even when the insurer also deducted the line.
+const HOSPITAL_TYPES = new Set<Finding["type"]>([
+  "duplicate_charge",
+  "unbundling",
+  "overcharge_vs_benchmark",
+  "mrp_violation",
+  "billing_beyond_stay",
+]);
+
 /** Who the patient should raise this finding with. */
-export function partyFor(f: Pick<Finding, "type" | "deductionIds">): "insurer" | "hospital" {
-  return INSURER_TYPES.has(f.type) || f.deductionIds.length > 0 ? "insurer" : "hospital";
+export function partyFor(f: Pick<Finding, "type" | "deductionIds" | "lineIds" | "title">): "insurer" | "hospital" {
+  if (INSURER_TYPES.has(f.type)) return "insurer";
+  if (HOSPITAL_TYPES.has(f.type)) return "hospital";
+  if (f.deductionIds.length) return "insurer";
+  if (f.lineIds.length) return "hospital";
+  return /settle|insurer|tpa|approv|claim/i.test(f.title) ? "insurer" : "hospital";
 }
 
 /** Merge AI and rule findings, dropping rule findings that duplicate an AI one. */
 export function buildAudit(x: Extraction, mode: AuditResult["mode"]): AuditResult {
   const ai = x.findings;
+  const sameAmount = (a: Finding, r: Finding) => Math.abs(a.disputedAmount - r.disputedAmount) < 1;
   const rules = runRules(x).filter(
     (r) =>
       !ai.some(
         (a) =>
-          a.type === r.type &&
-          (r.lineIds.some((id) => a.lineIds.includes(id)) ||
-            r.deductionIds.some((id) => a.deductionIds.includes(id)) ||
-            (r.lineIds.length === 0 && Math.abs(a.disputedAmount - r.disputedAmount) < 1)),
+          // Document-level rule findings (totals, settlement gap) have no line or deduction to
+          // match on, and the model may label the same discrepancy with a different type.
+          (r.lineIds.length === 0 && r.deductionIds.length === 0 && a.lineIds.length === 0 && sameAmount(a, r)) ||
+          (a.type === r.type &&
+            (r.lineIds.some((id) => a.lineIds.includes(id)) ||
+              r.deductionIds.some((id) => a.deductionIds.includes(id)) ||
+              (r.lineIds.length === 0 && sameAmount(a, r)))),
       ),
   );
   const sev = { high: 0, medium: 1, low: 2 } as const;

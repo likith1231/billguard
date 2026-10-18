@@ -1,0 +1,284 @@
+import { LineItemCategory, type Extraction, type LineItem } from "./schema";
+
+/**
+ * Manual mode: the patient types (or imports) the bill instead of uploading it,
+ * and only the deterministic rules run. No API key or credits needed.
+ */
+
+export type LineDraft = {
+  date: string;
+  description: string;
+  code: string;
+  category: LineItemCategory;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+  mrp: string;
+};
+
+export type DeductionDraft = { description: string; reasonGiven: string; amount: string; lines: string };
+
+export type ManualDraft = {
+  patientName: string;
+  claimNumber: string;
+  policyNumber: string;
+  hospitalName: string;
+  billNumber: string;
+  admissionDate: string;
+  dischargeDate: string;
+  billedTotal: string;
+  lines: LineDraft[];
+  insurer: string;
+  claimedAmount: string;
+  approvedAmount: string;
+  deductions: DeductionDraft[];
+  sumInsured: string;
+  roomRentLimitPerDay: string;
+  copayPercent: string;
+};
+
+export const emptyLine = (): LineDraft => ({ date: "", description: "", code: "", category: "other", quantity: "1", unitPrice: "", amount: "", mrp: "" });
+export const emptyDeduction = (): DeductionDraft => ({ description: "", reasonGiven: "", amount: "", lines: "" });
+
+export const emptyDraft = (): ManualDraft => ({
+  patientName: "",
+  claimNumber: "",
+  policyNumber: "",
+  hospitalName: "",
+  billNumber: "",
+  admissionDate: "",
+  dischargeDate: "",
+  billedTotal: "",
+  lines: [emptyLine(), emptyLine(), emptyLine()],
+  insurer: "",
+  claimedAmount: "",
+  approvedAmount: "",
+  deductions: [],
+  sumInsured: "",
+  roomRentLimitPerDay: "",
+  copayPercent: "",
+});
+
+/** Parses "1,20,000", "₹ 450.50", "Rs. 90" etc. Empty or junk → null. */
+export function num(s: string | number | null | undefined): number | null {
+  if (typeof s === "number") return Number.isFinite(s) ? s : null;
+  const t = (s ?? "").replace(/rs\.?|inr|₹|,|\s/gi, "");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+const KEYWORDS: [LineItemCategory, RegExp][] = [
+  ["icu", /\bicu\b|intensive care|\bhdu\b|\bccu\b|\bnicu\b/i],
+  ["room", /room|ward|bed charge|suite/i],
+  ["ot_charges", /\bot\b|operation theat|theatre/i],
+  ["surgery_package", /package/i],
+  ["consultation", /consult|visit|doctor|dr\./i],
+  ["diagnostics_imaging", /x-?ray|\bct\b|mri|usg|ultrasound|scan|echo|doppler/i],
+  ["diagnostics_lab", /\bcbc\b|\blft\b|\bkft\b|\bcrp\b|blood|urine|culture|test|panel|profile|lab/i],
+  ["implant", /implant|stent|prosthe|mesh|plate|screw/i],
+  ["pharmacy", /\binj\b|inj\.|tab\b|tab\.|cap\.|syrup|\bmg\b|\bml\b|infusion|saline|medicine|drug|pharmacy/i],
+  ["consumables", /glove|syringe|cannula|gauze|kit|catheter|mask|consumable|dressing/i],
+  ["nursing", /nursing|nurse/i],
+  ["procedure", /procedure|dressing|surgery|surgeon|anaesth|anesth/i],
+  ["admin", /admission|registration|admin|service charge|file|record/i],
+];
+
+export function guessCategory(description: string): LineItemCategory {
+  return KEYWORDS.find(([, re]) => re.test(description))?.[0] ?? "other";
+}
+
+/** Minimal RFC 4180 CSV reader (quoted fields, escaped quotes, CRLF). */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  const src = text.replace(/^﻿/, "");
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else field += ch;
+  }
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+
+const HEADERS: Record<keyof LineDraft, RegExp> = {
+  date: /^date|^day/i,
+  description: /desc|item|particular|service|name/i,
+  code: /code|batch|hsn|cpt/i,
+  category: /categ|head|type|dept/i,
+  quantity: /qty|quant|units?$|^no/i,
+  unitPrice: /unit|rate|price/i,
+  amount: /amount|total|value|net/i,
+  mrp: /mrp/i,
+};
+
+/**
+ * Reads line items from a CSV with a header row. Accepts BillGuard's own
+ * line-item export, the template, and most hospital/spreadsheet exports.
+ */
+export function linesFromCsv(text: string): LineDraft[] {
+  const [head, ...rows] = parseCsv(text);
+  if (!head) throw new Error("The CSV is empty.");
+  const col = {} as Record<keyof LineDraft, number>;
+  const used = new Set<number>();
+  // MRP and unit price first so "Unit price"/"MRP" aren't claimed by looser patterns.
+  for (const k of ["mrp", "unitPrice", "quantity", "description", "date", "code", "category", "amount"] as (keyof LineDraft)[]) {
+    const i = head.findIndex((h, j) => !used.has(j) && HEADERS[k].test(h.trim()));
+    if (i >= 0) {
+      col[k] = i;
+      used.add(i);
+    }
+  }
+  if (col.description === undefined) throw new Error("Couldn't find a description column. Use the template's headers.");
+  if (col.amount === undefined && col.unitPrice === undefined) throw new Error("Couldn't find an amount or rate column.");
+  const cell = (r: string[], k: keyof LineDraft) => (col[k] === undefined ? "" : (r[col[k]] ?? "").trim());
+  return rows
+    .map((r) => {
+      const description = cell(r, "description");
+      const cat = cell(r, "category").toLowerCase().replace(/[^a-z]+/g, "_");
+      return {
+        date: cell(r, "date"),
+        description,
+        code: cell(r, "code"),
+        category: LineItemCategory.safeParse(cat).success ? (cat as LineItemCategory) : guessCategory(description),
+        quantity: cell(r, "quantity") || "1",
+        unitPrice: cell(r, "unitPrice"),
+        amount: cell(r, "amount"),
+        mrp: cell(r, "mrp"),
+      };
+    })
+    .filter((l) => l.description);
+}
+
+export const CSV_TEMPLATE =
+  "Date,Description,Code,Category,Quantity,Unit price,Amount,MRP\r\n" +
+  "2026-03-02,Private room,,room,3,9000,27000,\r\n" +
+  "2026-03-02,CBC,LAB-01,diagnostics_lab,1,650,650,\r\n" +
+  "2026-03-03,Inj. Ceftriaxone 1g,B2231,pharmacy,6,95,570,68\r\n";
+
+/** Converts the form into the same Extraction shape Claude returns, minus AI findings. */
+export function draftToExtraction(d: ManualDraft): Extraction {
+  const lineItems: LineItem[] = d.lines
+    .filter((l) => l.description.trim() && (num(l.amount) !== null || num(l.unitPrice) !== null))
+    .map((l, i) => {
+      const quantity = num(l.quantity) ?? 1;
+      const unitPrice = num(l.unitPrice) ?? (num(l.amount) ?? 0) / (quantity || 1);
+      return {
+        id: `L${i + 1}`,
+        date: l.date.trim() || null,
+        description: l.description.trim(),
+        code: l.code.trim() || null,
+        category: l.category,
+        quantity,
+        unitPrice,
+        amount: num(l.amount) ?? quantity * unitPrice,
+        mrp: num(l.mrp),
+        page: null,
+      };
+    });
+  const ids = new Set(lineItems.map((l) => l.id));
+  const text = (s: string) => s.trim() || null;
+  return {
+    currency: "INR",
+    patient: { name: text(d.patientName), policyNumber: text(d.policyNumber), claimNumber: text(d.claimNumber) },
+    hospital: {
+      name: text(d.hospitalName),
+      billNumber: text(d.billNumber),
+      admissionDate: text(d.admissionDate),
+      dischargeDate: text(d.dischargeDate),
+      diagnosis: null,
+      billedTotal: num(d.billedTotal),
+    },
+    lineItems,
+    settlement: {
+      insurer: text(d.insurer),
+      claimedAmount: num(d.claimedAmount),
+      approvedAmount: num(d.approvedAmount),
+      deductions: d.deductions
+        .filter((x) => num(x.amount))
+        .map((x, i) => ({
+          id: `D${i + 1}`,
+          description: x.description.trim() || x.reasonGiven.trim() || "Deduction",
+          amount: num(x.amount) ?? 0,
+          reasonGiven: x.reasonGiven.trim() || x.description.trim(),
+          relatedLineIds: x.lines
+            .split(/[\s,]+/)
+            .map((s) => s.trim().toUpperCase().replace(/^(\d+)$/, "L$1"))
+            .filter((s) => ids.has(s)),
+        })),
+    },
+    policy: {
+      sumInsured: num(d.sumInsured),
+      roomRentLimitPerDay: num(d.roomRentLimitPerDay),
+      copayPercent: num(d.copayPercent),
+      consumablesCovered: null,
+      relevantClauses: [],
+    },
+    findings: [],
+    summary: "",
+  };
+}
+
+/** Fills the form from an extraction (used for "Load the sample bill"). */
+export function extractionToDraft(x: Extraction): ManualDraft {
+  const s = (v: number | string | null) => (v === null ? "" : String(v));
+  return {
+    patientName: s(x.patient.name),
+    claimNumber: s(x.patient.claimNumber),
+    policyNumber: s(x.patient.policyNumber),
+    hospitalName: s(x.hospital.name),
+    billNumber: s(x.hospital.billNumber),
+    admissionDate: s(x.hospital.admissionDate),
+    dischargeDate: s(x.hospital.dischargeDate),
+    billedTotal: s(x.hospital.billedTotal),
+    lines: x.lineItems.map((l) => ({
+      date: s(l.date),
+      description: l.description,
+      code: s(l.code),
+      category: l.category,
+      quantity: s(l.quantity),
+      unitPrice: s(l.unitPrice),
+      amount: s(l.amount),
+      mrp: s(l.mrp),
+    })),
+    insurer: s(x.settlement.insurer),
+    claimedAmount: s(x.settlement.claimedAmount),
+    approvedAmount: s(x.settlement.approvedAmount),
+    deductions: x.settlement.deductions.map((d) => ({
+      description: d.description,
+      reasonGiven: d.reasonGiven,
+      amount: s(d.amount),
+      lines: d.relatedLineIds.join(", "),
+    })),
+    sumInsured: s(x.policy.sumInsured),
+    roomRentLimitPerDay: s(x.policy.roomRentLimitPerDay),
+    copayPercent: s(x.policy.copayPercent),
+  };
+}
+
+/** One-paragraph summary for manual audits, since there's no model to write one. */
+export function manualSummary(x: Extraction, count: number, total: number) {
+  if (!count) return "The rules engine found no arithmetic, duplicate, MRP, stay-length, benchmark or settlement problems in what you entered. Upload the documents for an AI audit to also check bundling and policy wording.";
+  return `The rules engine found ${count} issue${count > 1 ? "s" : ""} worth about ₹${Math.round(total).toLocaleString("en-IN")} in the ${x.lineItems.length} lines you entered. Manual audits cover maths, duplicates, MRP, stay length, benchmarks and settlement arithmetic; an AI audit of the documents also checks package bundling and policy wording.`;
+}

@@ -12,6 +12,7 @@ import FindingCard from "./FindingCard";
 import LetterPanel from "./LetterPanel";
 import LineTable from "./LineTable";
 import RecoveryPlan from "./RecoveryPlan";
+import ReportPrint, { printReport } from "./ReportPrint";
 import Settlement from "./Settlement";
 
 const TABS = [
@@ -47,6 +48,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
   const selectedTotal = result.findings.filter((f) => selected.has(f.id)).reduce((s, f) => s + Math.max(0, f.disputedAmount), 0);
   const slug = (x.patient.claimNumber ?? x.hospital.billNumber ?? "audit").replace(/[^\w-]+/g, "-");
   const exports = [
+    { label: "PDF report (print)", on: printReport },
     { label: "Findings CSV", on: () => download(`billguard-${slug}-findings.csv`, findingsCsv(result), "text/csv;charset=utf-8") },
     { label: "Line items CSV", on: () => download(`billguard-${slug}-lines.csv`, linesCsv(result), "text/csv;charset=utf-8") },
     { label: "Full report JSON", on: () => download(`billguard-${slug}.json`, JSON.stringify(result, null, 2), "application/json") },
@@ -66,6 +68,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-mono text-xs tracking-[0.3em] text-mint">AUDIT REPORT</p>
             {result.mode === "demo" && <span className="rounded-full bg-violet/20 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-violet uppercase">Sample case</span>}
+            {result.mode === "manual" && <span className="rounded-full bg-mint/15 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-mint uppercase">Manual · rules only</span>}
           </div>
           <h1 className="font-display mt-2 text-3xl font-semibold tracking-tight md:text-4xl">{x.hospital.name ?? "Hospital bill"}</h1>
           <p className="mt-1 text-sm text-muted">
@@ -74,7 +77,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
               .join(" · ")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <a href="#letter" className="inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-sm font-semibold text-black hover:brightness-110">
             <FileText className="h-4 w-4" /> Draft letter
           </a>
@@ -82,7 +85,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
             <summary className="glass inline-flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5 [&::-webkit-details-marker]:hidden">
               <Download className="h-4 w-4" /> Export
             </summary>
-            <div className="glass-strong absolute right-0 z-20 mt-2 w-48 rounded-2xl p-1.5">
+            <div className="glass-strong absolute right-0 z-20 mt-2 w-52 rounded-2xl p-1.5">
               {exports.map((e) => (
                 <button
                   key={e.label}
@@ -142,14 +145,14 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
 
       {/* Tabs */}
       <div className="mt-10 flex flex-wrap items-center justify-between gap-3">
-        <div role="tablist" className="glass inline-flex rounded-2xl p-1">
+        <div role="tablist" className="glass scrollbar-thin inline-flex max-w-full overflow-x-auto rounded-2xl p-1">
           {TABS.map((t) => (
             <button
               key={t.id}
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${tab === t.id ? "bg-white/10 text-ink" : "text-muted hover:text-ink"}`}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${tab === t.id ? "bg-white/10 text-ink" : "text-muted hover:text-ink"}`}
             >
               <t.icon className="h-4 w-4" /> {t.label}
             </button>
@@ -192,6 +195,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
         {tab === "plan" && <RecoveryPlan result={result} selected={selected} />}
       </div>
 
+      <ReportPrint result={result} selected={selected} />
       <LetterPanel result={result} selected={selected} setSelected={setSelected} />
 
       <p className="mt-10 text-xs leading-relaxed text-muted">

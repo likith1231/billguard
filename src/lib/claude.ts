@@ -1,10 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { BENCHMARKS } from "./benchmarks";
-import { Extraction, type AuditResult } from "./schema";
+import { Extraction, WireExtraction, type AuditResult } from "./schema";
 
-export const MODEL = "claude-opus-5-5";
-const BETAS = ["server-side-fallback-2026-07-01"];
+/** Override with CLAUDE_MODEL, e.g. claude-opus-5-5 (most thorough) or claude-haiku-5-5 (cheapest). */
+export const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
+
+// Server-side refusal fallback; Haiku has none, so it is only sent for the other models.
+const FALLBACK = MODEL.startsWith("claude-haiku")
+  ? {}
+  : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const };
 
 let _client: Anthropic | null = null;
 export function client() {
@@ -33,7 +38,7 @@ const AUDIT_SYSTEM = `You are BillGuard, a meticulous medical-billing and health
 
 You receive a hospital bill and, when available, the insurer/TPA settlement letter and the policy wording. Do two jobs in one pass:
 
-1. EXTRACT faithfully. Every line item on the bill, with quantity, unit price and amount exactly as printed (do not correct the hospital's arithmetic — downstream code checks it). Every deduction in the settlement letter with the reason exactly as the insurer worded it, linked to the bill lines it relates to. Policy limits (sum insured, room-rent cap, co-pay, consumables cover) and the clauses that matter for this claim, quoted verbatim. Use null for anything not present. Never invent values.
+1. EXTRACT faithfully. Every line item on the bill, with quantity, unit price and amount exactly as printed (do not correct the hospital's arithmetic — downstream code checks it). Every deduction in the settlement letter with the reason exactly as the insurer worded it, linked to the bill lines it relates to. Policy limits (sum insured, room-rent cap, co-pay, consumables cover). Quote the policy wording a finding relies on verbatim in its evidence, with the clause number in policyClause. For anything not present use null (or an empty string for text fields). Never invent values.
 
 2. AUDIT as an advocate for the patient. Flag only issues you can support with evidence quoted from the documents. Look especially for:
 - Unbundling: items billed separately that are included in a surgery/procedure package or in room charges (nursing, RMO visits, bed linen, routine monitoring).
@@ -95,10 +100,9 @@ export async function extractAndAudit(docs: UploadedDoc[], notes?: string): Prom
   const stream = client().beta.messages.stream({
     model: MODEL,
     max_tokens: 64000,
-    betas: BETAS,
-    fallbacks: "default",
+    ...FALLBACK,
     thinking: { type: "adaptive" },
-    output_config: { effort: "high", format: betaZodOutputFormat(Extraction) },
+    output_config: { effort: "high", format: betaZodOutputFormat(WireExtraction) },
     system: AUDIT_SYSTEM,
     messages: [{ role: "user", content }],
   });
@@ -143,8 +147,7 @@ export function letterStream(audit: AuditResult, recipient: "insurer" | "hospita
   return client().beta.messages.stream({
     model: MODEL,
     max_tokens: 16000,
-    betas: BETAS,
-    fallbacks: "default",
+    ...FALLBACK,
     thinking: { type: "adaptive" },
     output_config: { effort: "medium" },
     system: LETTER_SYSTEM,

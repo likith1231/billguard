@@ -12,10 +12,17 @@ const ALLOWED = /^(application\/pdf|image\/(png|jpeg|gif|webp)|text\/plain)$/;
 export async function POST(req: Request) {
   const form = await req.formData();
 
-  if (form.get("demo") === "1" || !hasCredentials()) {
+  if (form.get("demo") === "1") {
     // Small pause so the scanning animation has time to play.
     await new Promise((r) => setTimeout(r, 2200));
     return Response.json(buildAudit(SAMPLE_EXTRACTION, "demo"));
+  }
+
+  if (!hasCredentials()) {
+    return Response.json(
+      { error: "Reading documents needs an Anthropic API key on the server. Try the sample case, or enter the bill manually for a free rules-only audit." },
+      { status: 503 },
+    );
   }
 
   const docs: UploadedDoc[] = [];
@@ -46,6 +53,9 @@ export async function POST(req: Request) {
     if (e instanceof AuditError) return Response.json({ error: e.message }, { status: e.status });
     if (e instanceof Anthropic.RateLimitError) return Response.json({ error: "Rate limited — try again in a minute." }, { status: 429 });
     if (e instanceof Anthropic.AuthenticationError) return Response.json({ error: "The server's Anthropic API key is invalid." }, { status: 500 });
+    if (e instanceof Anthropic.BadRequestError && /credit balance/i.test(e.message)) {
+      return Response.json({ error: "The AI service is out of credits right now. Try the sample case, or enter the bill manually for a free rules-only audit." }, { status: 402 });
+    }
     if (e instanceof Anthropic.BadRequestError) return Response.json({ error: `The AI service rejected the request: ${e.message}` }, { status: 400 });
     if (e instanceof Anthropic.APIError) return Response.json({ error: "The AI service is unavailable right now." }, { status: 502 });
     console.error(e);

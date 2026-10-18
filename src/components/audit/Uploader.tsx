@@ -1,8 +1,10 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Download, FileCheck2, FileSearch, Landmark, Receipt, ScrollText, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Download, FileCheck2, FileSearch, Keyboard, Landmark, Receipt, ScrollText, Sparkles, X } from "lucide-react";
 import { useRef, useState, type ComponentType } from "react";
 import TiltCard from "@/components/ui/TiltCard";
+import type { Extraction } from "@/lib/schema";
+import ManualEntry from "./ManualEntry";
 
 export type Files = { bill: File[]; insurer_letter: File[]; policy: File[] };
 type Role = keyof Files;
@@ -84,25 +86,90 @@ function Slot({ slot, files, onAdd, onRemove }: { slot: (typeof SLOTS)[number]; 
   );
 }
 
-export default function Uploader({ onRun, error }: { onRun: (f: Files | null, notes?: string) => void; error: string | null }) {
+export default function Uploader({
+  onRun,
+  onManual,
+  onModeChange,
+  error,
+}: {
+  onRun: (f: Files | null, notes?: string) => void;
+  onManual: (x: Extraction) => void;
+  onModeChange?: (mode: "upload" | "manual") => void;
+  error: string | null;
+}) {
   const [files, setFiles] = useState<Files>({ bill: [], insurer_letter: [], policy: [] });
   const [notes, setNotes] = useState("");
+  const [mode, setMode] = useState<"upload" | "manual">("upload");
   const ready = files.bill.length > 0;
+
+  const header = (
+    <>
+      <p className="font-mono text-xs tracking-[0.3em] text-mint">NEW AUDIT</p>
+      <h1 className="font-display mt-3 text-4xl font-semibold tracking-tight md:text-5xl">{mode === "upload" ? "Upload your documents." : "Enter the bill yourself."}</h1>
+      <p className="mt-4 max-w-lg text-ink-2">
+        {mode === "upload"
+          ? "The bill is enough to catch hospital overcharges. Add the insurer\u2019s letter and policy wording to audit the claim settlement too."
+          : "Free and private: the rules engine checks maths, duplicates, MRP, stay length, price benchmarks, co-pay and settlement arithmetic right in your browser."}
+      </p>
+      <div role="tablist" aria-label="How to add the bill" className="glass mt-6 inline-flex rounded-2xl p-1">
+        {(
+          [
+            ["upload", "Upload documents", Sparkles, "AI"],
+            ["manual", "Enter manually", Keyboard, "Free"],
+          ] as const
+        ).map(([k, label, Icon, tag]) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={mode === k}
+            onClick={() => {
+              setMode(k);
+              onModeChange?.(k);
+            }}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${mode === k ? "bg-white/10 text-ink" : "text-muted hover:text-ink"}`}
+          >
+            <Icon className="h-4 w-4" /> {label}
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase ${k === "manual" ? "bg-mint/15 text-mint" : "bg-violet/20 text-violet"}`}>{tag}</span>
+          </button>
+        ))}
+      </div>
+      {error && (
+        <div role="alert" className="mt-6 flex max-w-2xl items-start gap-3 rounded-2xl border border-coral/40 bg-coral/10 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-coral" />
+          <span>
+            {error}
+            {mode === "upload" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("manual");
+                  onModeChange?.("manual");
+                }}
+                className="ml-2 font-medium text-mint underline-offset-2 hover:underline">
+                Enter it manually →
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  if (mode === "manual") {
+    return (
+      <div>
+        {header}
+        <div className="mt-8">
+          <ManualEntry onRun={onManual} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-10 lg:grid-cols-[1.25fr_1fr]">
       <div>
-        <p className="font-mono text-xs tracking-[0.3em] text-mint">NEW AUDIT</p>
-        <h1 className="font-display mt-3 text-4xl font-semibold tracking-tight md:text-5xl">Upload your documents.</h1>
-        <p className="mt-4 max-w-lg text-ink-2">
-          The bill is enough to catch hospital overcharges. Add the insurer&apos;s letter and policy wording to audit the claim settlement too.
-        </p>
-
-        {error && (
-          <div role="alert" className="mt-6 flex items-start gap-3 rounded-2xl border border-coral/40 bg-coral/10 p-4 text-sm">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-coral" /> {error}
-          </div>
-        )}
+        {header}
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
           {SLOTS.map((s) => (

@@ -14,7 +14,7 @@
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_v4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
 ![Three.js](https://img.shields.io/badge/Three.js_·_R3F-000000?style=for-the-badge&logo=threedotjs&logoColor=white)
 
-![Claude](https://img.shields.io/badge/Claude_Opus_5.5-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude_Sonnet_5.5-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
 ![Zod](https://img.shields.io/badge/Zod-3E67B1?style=for-the-badge&logo=zod&logoColor=white)
 ![Motion](https://img.shields.io/badge/Motion-FF0055?style=for-the-badge&logo=framer&logoColor=white)
 
@@ -78,7 +78,7 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
 | 🤖 **AI vs Rule badges** | You can see whether a finding came from Claude's reading or the deterministic rules engine |
 | 📑 **Line-item table** | Every extracted line, with flagged rows highlighted and linked to their findings |
 | 🌊 **Settlement waterfall** | Claimed → each deduction → approved, with disputed deductions marked |
-| 📤 **Export** | Findings and line items as Excel-ready CSV (UTF-8 ₹, formula-injection safe), or the full report as JSON |
+| 📤 **Export** | A print-ready **PDF report**, findings and line items as Excel-ready CSV (UTF-8 ₹, formula-injection safe), or the full report as JSON |
 
 ### 💸 Recovery plan
 
@@ -96,7 +96,7 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
 |---|---|
 | 🎯 **Pick recipient & points** | Insurer (Grievance Redressal Officer) or hospital (Billing / Patient Relations); choose which findings to include |
 | ⚡ **Streams live** | The letter writes itself onto a paper panel in real time |
-| ✏️ **Editable** | Tweak the text, then copy, download as `.txt` or print |
+| ✏️ **Editable** | Tweak the text, then copy, download as `.txt` or print / save as PDF |
 | 🏛️ **Escalation built in** | Insurer letters mention the Insurance Ombudsman and the IRDAI Bima Bharosa portal |
 
 ### 🌐 Experience
@@ -107,6 +107,7 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
 | 🎛️ **Reactive** | The scene follows the mouse, reacts to scroll, speeds up while auditing and settles when the report is ready |
 | 🃏 **3D tilt cards** | Glass cards tilt toward the pointer with a moving highlight |
 | 🧪 **Demo mode** | Runs without an API key on a built-in sample case, so anyone can try it |
+| ⌨️ **Free manual mode** | No documents or API key? Type the bill lines in (or import a CSV) and the rules engine audits them in your browser |
 | 📱 **Responsive** | From 390px phones to wide desktops; respects `prefers-reduced-motion` |
 
 ---
@@ -124,6 +125,10 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
   </tr>
   <tr>
     <td colspan="2"><img src="docs/screenshots/plan.png" alt="Recovery plan" /><p align="center"><b>Recovery plan</b>: where the money went, escalation deadlines, late-settlement interest</p></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/manual.png" alt="Manual entry" /><p align="center"><b>Free manual mode</b>: type or import the bill</p></td>
+    <td width="50%"><img src="docs/screenshots/pdf-report.png" alt="PDF report" /><p align="center"><b>PDF report</b>: print-ready audit</p></td>
   </tr>
 </table>
 
@@ -151,24 +156,29 @@ flowchart LR
     end
 
     subgraph AUDIT["🔎 Audit pipeline"]
-        C["🤖 Claude Opus 5.5<br/>extract + judge<br/>(Zod structured output)"]
+        C["🤖 Claude Sonnet 5.5<br/>extract + judge<br/>(Zod structured output)"]
         RU["🧮 Rules engine<br/>maths · duplicates · MRP<br/>stay · benchmarks · settlement"]
         M["🔀 Merge & rank<br/>dedupe · severity · totals"]
     end
 
     UI --> A --> C --> RU --> M -->|AuditResult| UI
     UI --> L -->|"streamed text"| UI
-    L --> C2["🤖 Claude Opus 5.5<br/>dispute letter"]
+    L --> C2["🤖 Claude Sonnet 5.5<br/>dispute letter"]
+    UI -->|"manual entry / CSV"| RU
 ```
 
 ### How an audit works
 
-1. **Extract + judge (one Claude call).** The documents go to Claude Opus 5.5 with a [Zod](https://zod.dev) schema as structured output. It returns every line item exactly as printed, every deduction with the insurer's wording, the policy limits and clauses that matter, and the findings that need judgement (bundling, clause mismatches, co-pay, riders), each with verbatim evidence.
-2. **Rules engine.** [`src/lib/rules.ts`](src/lib/rules.ts) re-checks the extracted data deterministically: arithmetic, exact duplicates, bed-days vs stay length, MRP, benchmark outliers, bill totals, settlement maths, and proportionate cuts on exempt heads. These numbers are reproducible.
+1. **Extract + judge (one Claude call).** The documents go to Claude (Sonnet 5.5 by default, set `CLAUDE_MODEL` to change it) with a [Zod](https://zod.dev) schema as structured output. It returns every line item exactly as printed, every deduction with the insurer's wording, the policy limits, and the findings that need judgement (bundling, clause mismatches, co-pay, riders), each with verbatim evidence.
+2. **Rules engine.** [`src/lib/rules.ts`](src/lib/rules.ts) re-checks the extracted data deterministically: arithmetic, exact duplicates, bed-days vs stay length, MRP, benchmark outliers, bill totals, settlement maths, co-pay and room-rent deductions against the policy limits, and proportionate cuts on exempt heads. These numbers are reproducible.
 3. **Merge & rank.** Rule findings that duplicate an AI finding are dropped; the rest are sorted by severity and amount, and the totals are computed.
 4. **Letter.** A second Claude call streams a formal dispute letter that uses only the selected findings' facts.
 
-> 🛟 Both Claude calls have server-side refusal fallback enabled (`fallbacks: "default"`).
+> 🛟 Both Claude calls have server-side refusal fallback enabled (`fallbacks: "default"`), except on Haiku, which doesn't support it.
+
+### ⌨️ Free manual mode
+
+On `/audit`, **Enter manually** skips the AI entirely: type the bill lines (or import a CSV, including BillGuard's own line-item export), add the insurer's deductions and policy limits, and the same rules engine runs in your browser. It catches arithmetic errors, duplicates, MRP violations, extra bed-days, benchmark outliers, settlement gaps, co-pay above the policy rate, room-rent deductions when the room was within the cap, and proportionate cuts on exempt heads. Bundling and policy-wording checks need the AI.
 
 ---
 
@@ -180,7 +190,8 @@ flowchart LR
 | **Styling** | Tailwind CSS v4, glassmorphism utilities, Space Grotesk · Inter · JetBrains Mono |
 | **3D** | Three.js, React Three Fiber, drei (`MeshTransmissionMaterial`, `Float`, `Sparkles`, `Lightformer`), postprocessing (Bloom, Chromatic Aberration, Vignette) |
 | **Animation** | Motion (scroll reveals, counters, transitions) |
-| **AI** | Anthropic SDK · Claude Opus 5.5 · adaptive thinking · structured outputs · streaming |
+| **AI** | Anthropic SDK · Claude Sonnet 5.5 (configurable) · adaptive thinking · structured outputs · streaming |
+| **Testing** | Vitest |
 | **Validation** | Zod v4 |
 | **Icons** | Lucide |
 
@@ -207,7 +218,7 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 
 ### 🧪 Try it with the sample documents
 
-[`public/samples/`](public/samples) has a fictitious, internally consistent case: a hospital bill, insurer letter and policy extract. With an API key set, upload them on `/audit` to watch the live pipeline find the same issues as the built-in demo (about **₹63,451** recoverable across 11 findings).
+[`public/samples/`](public/samples) has a fictitious, internally consistent case: a hospital bill, insurer letter and policy extract. With an API key set, upload them on `/audit` to watch the live pipeline find the same issues as the built-in demo (about **₹63,000** recoverable across 11–12 findings; exact numbers vary slightly between runs).
 
 ### Scripts
 
@@ -217,6 +228,7 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run lint` | ESLint |
+| `npm test` | Vitest: rules engine, party routing, CSV import/export, AI schema limits |
 
 ---
 
@@ -224,7 +236,8 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | No | Enables live audits and AI-written letters. **Without it, BillGuard runs in demo mode**: `/api/audit` returns the sample case and letters use a deterministic template. |
+| `ANTHROPIC_API_KEY` | No | Enables AI audits of uploaded documents and AI-written letters. **Without it**, the sample case and the free manual mode still work, and letters use a deterministic template. |
+| `CLAUDE_MODEL` | No | Model for audits and letters. Default `claude-sonnet-5-5`; use `claude-opus-5-5` for the most thorough audits or `claude-haiku-5-5` for the cheapest. |
 
 > 🔒 `.env.local` is git-ignored. Never commit your key.
 
@@ -242,15 +255,17 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 | `insurer_letter` | file(s) | Settlement / deduction letter |
 | `policy` | file(s) | Policy wording |
 | `notes` | string | Optional context from the patient (max 2,000 chars) |
-| `demo` | `"1"` | Force the sample case |
+| `demo` | `"1"` | Return the sample case |
 
-Returns an `AuditResult`: the extraction, ranked `findings[]` (each with `type`, `severity`, `evidence[]`, `disputedAmount`, `lineIds`, `deductionIds`, `action`, `source: "ai" \| "rules"`), `totals` and `mode: "live" \| "demo"`. Limit: 20 MB total.
+Returns an `AuditResult`: the extraction, ranked `findings[]` (each with `type`, `severity`, `evidence[]`, `disputedAmount`, `lineIds`, `deductionIds`, `action`, `source: "ai" \| "rules"`), `totals` and `mode: "live" \| "demo" \| "manual"`. Limit: 20 MB total.
+
+Errors: `503` when no API key is configured, `402` when the Anthropic account is out of credits, `429` when rate-limited. The UI then points the user to manual mode.
 
 ### `POST /api/letter`
 
 `application/json`: `{ audit, recipient: "insurer" | "hospital", findingIds: string[], sender? }`
 
-Streams the letter as `text/plain`.
+Streams the letter as `text/plain`. Sample and manual audits (or a failed AI call) use the built-in template letter.
 
 ---
 
@@ -271,7 +286,8 @@ billguard/
     │   ├── three/Scene.tsx      # R3F scene: bill sheets, scan beam, glass shield
     │   ├── audit/               # Uploader, Scanning, Results, FindingCard,
     │   │                        # LineTable, Settlement (waterfall), LetterPanel,
-    │   │                        # RecoveryPlan (money split, deadlines, interest)
+    │   │                        # RecoveryPlan (money split, deadlines, interest),
+    │   │                        # ManualEntry (free rules-only mode), ReportPrint (PDF)
     │   └── ui/                  # Background3D, TiltCard, Nav, Counter, Reveal, Logo
     └── lib/
         ├── schema.ts            # Zod schemas: line items, deductions, findings
@@ -281,6 +297,8 @@ billguard/
         ├── sample.ts            # Demo-mode sample case
         ├── letter-template.ts   # Demo-mode letter
         ├── export.ts            # CSV / JSON exports
+        ├── manual.ts            # Manual mode: CSV import, form → extraction
+        └── __tests__/           # Vitest suites
         └── format.ts            # Money & label helpers
 ```
 
@@ -318,16 +336,17 @@ billguard/
 - BillGuard gives an **informational audit, not legal or medical advice**. Check each finding before you send a dispute.
 - Benchmarks in [`src/lib/benchmarks.ts`](src/lib/benchmarks.ts) are **indicative ranges, not official tariffs**. Swap in your city's CGHS rates, your insurer's PPN rates or NPPA ceiling prices.
 - Regulatory references are to IRDAI's 2024 Master Circular on Health Insurance; **your policy wording governs**.
-- Uploaded files are processed in memory and sent only to the Anthropic API. BillGuard stores nothing.
+- Uploaded files are processed in memory and sent only to the Anthropic API. BillGuard stores nothing. Manual-mode audits never leave your browser.
 - The sample hospital, insurer and patient are fictitious.
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] 🔌 Free rules-only mode that parses text-based PDFs without an API key
+- [x] ⌨️ Free rules-only mode: type the bill in or import a CSV, no API key needed
+- [x] 📄 Export the audit report as PDF
+- [ ] 🔌 Parse text-based PDFs in the free mode too
 - [ ] 🏥 Official CGHS / PPN / NPPA rate tables by city
-- [ ] 📄 Export the audit report as PDF
 - [ ] 📧 Send the letter by email directly from the app
 - [x] 📅 Escalation deadlines & late-settlement interest calculator
 - [x] 📤 CSV / JSON export

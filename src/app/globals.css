@@ -161,18 +161,28 @@ body {
 }
 
 @media print {
-  body * {
-    visibility: hidden;
+  /* Otherwise Chrome paints the page margins with the dark canvas colour. */
+  html {
+    color-scheme: light;
   }
-  .print-area,
-  .print-area * {
-    visibility: visible;
-  }
-  .print-area {
-    position: absolute;
-    inset: 0;
+
+  /* Only the requested print view (ReportPrint / LetterPanel portal it into <body>). */
+  html[data-print],
+  html[data-print] body {
     background: white !important;
-    color: black !important;
-    transform: none !important;
+  }
+  html[data-print="report"] body > *:not(.print-report),
+  html[data-print="letter"] body > *:not(.print-letter) {
+    display: none !important;
+  }
+  html[data-print="report"] .print-report,
+  html[data-print="letter"] .print-letter {
+    display: block !important;
+  }
+  html[data-print] .noise::after {
+    display: none;
+  }
+  @page {
+    margin: 12mm;
   }
 }

@@ -4,7 +4,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Background3D from "@/components/ui/Background3D";
-import type { AuditResult } from "@/lib/schema";
+import { manualSummary } from "@/lib/manual";
+import { buildAudit } from "@/lib/rules";
+import type { AuditResult, Extraction } from "@/lib/schema";
 import Results from "./Results";
 import Scanning from "./Scanning";
 import Uploader, { type Files } from "./Uploader";
@@ -17,6 +19,7 @@ export default function AuditApp() {
   const params = useSearchParams();
   const [state, setState] = useState<State>({ phase: "idle" });
   const ran = useRef(false);
+  const [manual, setManual] = useState(false);
 
   const run = useCallback(async (files: Files | null, notes = "") => {
     setState({ phase: "scanning" });
@@ -43,6 +46,19 @@ export default function AuditApp() {
     }
   }, []);
 
+  // Manual entry runs the rules engine locally; the pause lets the scan animation play.
+  const runManual = useCallback(async (x: Extraction) => {
+    setState({ phase: "scanning" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    await new Promise((r) => setTimeout(r, 1400));
+    const audit = buildAudit(x, "manual");
+    audit.extraction.summary = manualSummary(x, audit.findings.length, audit.totals.recoverable);
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify(audit));
+    } catch {}
+    setState({ phase: "done", result: audit });
+  }, []);
+
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
@@ -59,6 +75,7 @@ export default function AuditApp() {
   }, [params, run]);
 
   const reset = () => {
+    setManual(false);
     try {
       sessionStorage.removeItem(KEY);
     } catch {}
@@ -70,12 +87,12 @@ export default function AuditApp() {
   return (
     <>
       <Background3D mode={mode} />
-      {state.phase === "done" && <div aria-hidden className="pointer-events-none fixed inset-0 z-[5] bg-bg/70" />}
+      {(state.phase === "done" || (manual && state.phase !== "scanning")) && <div aria-hidden className="pointer-events-none fixed inset-0 z-[5] bg-bg/70" />}
       <main className="relative z-10 mx-auto max-w-6xl px-4 pt-28 pb-24">
         <AnimatePresence mode="wait">
           {state.phase === "idle" || state.phase === "error" ? (
             <motion.div key="up" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20, filter: "blur(6px)" }}>
-              <Uploader onRun={run} error={state.phase === "error" ? state.message : null} />
+              <Uploader onRun={run} onManual={runManual} onModeChange={(m) => setManual(m === "manual")} error={state.phase === "error" ? state.message : null} />
             </motion.div>
           ) : state.phase === "scanning" ? (
             <motion.div key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
