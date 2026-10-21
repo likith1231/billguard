@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowRight, FileDown, FileUp, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, FileDown, FileText, FileUp, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { download } from "@/lib/export";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import {
   CSV_TEMPLATE,
+  draftFromBillText,
   draftToExtraction,
   emptyDeduction,
   emptyDraft,
@@ -52,6 +53,9 @@ export default function ManualEntry({ onRun }: { onRun: (x: Extraction) => void 
   const [d, setD] = useState<ManualDraft>(emptyDraft);
   const [csvError, setCsvError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const billRef = useRef<HTMLInputElement>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
 
   const set = <K extends keyof ManualDraft>(k: K) => (v: ManualDraft[K]) => setD((p) => ({ ...p, [k]: v }));
   const setLine = (i: number, patch: Partial<LineDraft>) =>
@@ -79,6 +83,26 @@ export default function ManualEntry({ onRun }: { onRun: (x: Extraction) => void 
       setD((p) => ({ ...p, lines: [...p.lines.filter((l) => l.description.trim()), ...lines] }));
     } catch (e) {
       setCsvError((e as Error).message);
+    }
+  }
+
+  // Text-based PDFs and .txt bills are read in the browser; the user then reviews the filled form.
+  async function importBill(f: File) {
+    setCsvError(null);
+    setReadNote(null);
+    setReading(true);
+    try {
+      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      const text = isPdf ? (await import("@/lib/pdf-text").then((m) => m.pdfToText(f))) : await f.text();
+      if (!text.trim()) throw new Error("That PDF has no text layer (it looks scanned). Type the lines in or use the AI upload, which can read scans.");
+      const { fields, lines } = draftFromBillText(text);
+      if (!lines.length) throw new Error("Couldn't find a table of line items in that file. Try the CSV template instead.");
+      setD((p) => ({ ...p, ...fields, lines: [...p.lines.filter((l) => l.description.trim()), ...lines] }));
+      setReadNote(`Read ${lines.length} line${lines.length > 1 ? "s" : ""} from ${f.name}. Check them against your bill before running the audit.`);
+    } catch (e) {
+      setCsvError((e as Error).message);
+    } finally {
+      setReading(false);
     }
   }
 
@@ -110,6 +134,20 @@ export default function ManualEntry({ onRun }: { onRun: (x: Extraction) => void 
         hint="One row per bill line. Leave Amount blank to use quantity × rate."
         action={
           <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={reading} onClick={() => billRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-xl border border-mint/40 px-3 py-1.5 text-xs text-mint hover:bg-mint/10 disabled:opacity-50">
+              {reading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Read a text PDF
+            </button>
+            <input
+              ref={billRef}
+              type="file"
+              accept=".pdf,application/pdf,.txt,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importBill(f);
+                e.target.value = "";
+              }}
+            />
             <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-xs text-ink-2 hover:text-mint">
               <FileUp className="h-3.5 w-3.5" /> Import CSV
             </button>
@@ -131,6 +169,7 @@ export default function ManualEntry({ onRun }: { onRun: (x: Extraction) => void 
         }
       >
         {csvError && <p className="mb-3 text-sm text-coral">{csvError}</p>}
+        {readNote && <p className="mb-3 text-sm text-mint">{readNote}</p>}
         <div className="scrollbar-thin -mx-1 overflow-x-auto px-1">
           <table className="w-full min-w-[880px] text-sm">
             <thead>

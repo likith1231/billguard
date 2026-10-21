@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { AuditError, extractAndAudit, hasCredentials, type UploadedDoc } from "@/lib/claude";
+import { z } from "zod";
+import { CITIES, type RateContext } from "@/lib/benchmarks";
 import { buildAudit } from "@/lib/rules";
 import { SAMPLE_EXTRACTION } from "@/lib/sample";
 
@@ -8,6 +10,18 @@ export const maxDuration = 300;
 const MAX_BYTES = 20 * 1024 * 1024;
 const ROLES = ["bill", "insurer_letter", "policy"] as const;
 const ALLOWED = /^(application\/pdf|image\/(png|jpeg|gif|webp)|text\/plain)$/;
+
+const CustomRates = z.array(z.object({ item: z.string().max(120), high: z.number().positive(), low: z.number().optional(), unit: z.string().max(30).optional(), source: z.string().max(80).optional() })).max(2000);
+
+function ratesFrom(form: FormData): RateContext {
+  const city = String(form.get("city") ?? "");
+  let custom: RateContext["custom"];
+  try {
+    const raw = form.get("rates");
+    if (raw) custom = CustomRates.parse(JSON.parse(String(raw)));
+  } catch {}
+  return { city: CITIES.some((c) => c.name === city) ? city : null, custom };
+}
 
 export async function POST(req: Request) {
   const form = await req.formData();
@@ -48,7 +62,7 @@ export async function POST(req: Request) {
   try {
     const notes = String(form.get("notes") ?? "").slice(0, 2000) || undefined;
     const extraction = await extractAndAudit(docs, notes);
-    return Response.json(buildAudit(extraction, "live"));
+    return Response.json(buildAudit(extraction, "live", ratesFrom(form)));
   } catch (e) {
     if (e instanceof AuditError) return Response.json({ error: e.message }, { status: e.status });
     if (e instanceof Anthropic.RateLimitError) return Response.json({ error: "Rate limited — try again in a minute." }, { status: 429 });

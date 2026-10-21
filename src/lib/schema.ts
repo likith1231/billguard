@@ -145,5 +145,7 @@ export type AuditResult = {
   };
   /** live = read by Claude, demo = built-in sample, manual = typed in by the user (rules only). */
   mode: "live" | "demo" | "manual";
+  /** Price-band settings used for the benchmark check. Absent on audits saved before this existed. */
+  rates?: { city: string | null; tier: 1 | 2 | 3 | null; customRates: number };
   generatedAt: string;
 };

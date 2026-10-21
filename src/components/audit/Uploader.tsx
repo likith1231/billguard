@@ -3,8 +3,10 @@
 import { AlertTriangle, ArrowRight, Download, FileCheck2, FileSearch, Keyboard, Landmark, Receipt, ScrollText, Sparkles, X } from "lucide-react";
 import { useRef, useState, type ComponentType } from "react";
 import TiltCard from "@/components/ui/TiltCard";
+import type { RateContext } from "@/lib/benchmarks";
 import type { Extraction } from "@/lib/schema";
 import ManualEntry from "./ManualEntry";
+import RatePanel from "./RatePanel";
 
 export type Files = { bill: File[]; insurer_letter: File[]; policy: File[] };
 type Role = keyof Files;
@@ -90,11 +92,15 @@ export default function Uploader({
   onRun,
   onManual,
   onModeChange,
+  rates,
+  onRates,
   error,
 }: {
   onRun: (f: Files | null, notes?: string) => void;
   onManual: (x: Extraction) => void;
   onModeChange?: (mode: "upload" | "manual") => void;
+  rates: RateContext;
+  onRates: (r: RateContext) => void;
   error: string | null;
 }) {
   const [files, setFiles] = useState<Files>({ bill: [], insurer_letter: [], policy: [] });
@@ -133,6 +139,7 @@ export default function Uploader({
           </button>
         ))}
       </div>
+      <RatePanel rates={rates} onChange={onRates} />
       {error && (
         <div role="alert" className="mt-6 flex max-w-2xl items-start gap-3 rounded-2xl border border-coral/40 bg-coral/10 p-4 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-coral" />

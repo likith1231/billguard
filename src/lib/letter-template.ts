@@ -1,3 +1,4 @@
+import { LANGS, PHRASES, type Lang } from "./letter-i18n";
 import type { AuditResult } from "./schema";
 
 // Findings are phrased for the patient ("Ask the insurer to…"); a letter speaks to the recipient.
@@ -9,7 +10,8 @@ function remedy(action: string) {
 }
 
 /** Deterministic dispute letter used in demo mode (no API key). */
-export function templateLetter(audit: AuditResult, recipient: "insurer" | "hospital", findingIds: string[], sender?: string) {
+export function templateLetter(audit: AuditResult, recipient: "insurer" | "hospital", findingIds: string[], sender?: string, lang: Lang = "en") {
+  if (lang !== "en") return localisedLetter(audit, recipient, findingIds, sender, lang);
   const x = audit.extraction;
   const picked = audit.findings.filter((f) => findingIds.includes(f.id));
   const cur = x.currency === "INR" ? "Rs" : x.currency;
@@ -65,6 +67,69 @@ Enclosures:
 2. ${recipient === "insurer" ? "Claim settlement letter and policy wording" : "Discharge summary"}
 
 Yours faithfully,
+
+${name}
+`;
+}
+
+/** Hindi / Kannada template: the letter frame is translated, the per-point details stay as the audit wrote them. */
+function localisedLetter(audit: AuditResult, recipient: "insurer" | "hospital", findingIds: string[], sender: string | undefined, lang: Exclude<Lang, "en">) {
+  const t = PHRASES[lang];
+  const x = audit.extraction;
+  const picked = audit.findings.filter((f) => findingIds.includes(f.id));
+  const money = (n: number) => `Rs ${Math.round(n).toLocaleString("en-IN")}`;
+  const total = picked.reduce((s, f) => s + f.disputedAmount, 0);
+  const locale = LANGS.find((l) => l.id === lang)!.locale;
+  const today = new Date().toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
+  const name = sender || x.patient.name || t.placeholder.name;
+
+  const ref = [
+    x.patient.policyNumber && `${t.refs.policy} ${x.patient.policyNumber}`,
+    x.patient.claimNumber && `${t.refs.claim} ${x.patient.claimNumber}`,
+    x.hospital.billNumber && `${t.refs.bill} ${x.hospital.billNumber}`,
+  ].filter(Boolean).join(", ");
+
+  const to =
+    recipient === "insurer"
+      ? `${t.toInsurer}\n${x.settlement.insurer ?? t.insurerPlaceholder}\n${t.addressPlaceholder}`
+      : `${t.toHospital}\n${x.hospital.name ?? t.hospitalPlaceholder}\n${t.addressPlaceholder}`;
+
+  const points = picked
+    .map((f, i) => {
+      const ev = f.evidence.map((e) => `     - ${e}`).join("\n");
+      return `${i + 1}. ${f.title}\n   ${f.explanation}\n   ${t.evidence}:\n${ev}${f.policyClause ? `\n   ${t.reference}: ${f.policyClause}` : ""}\n   ${t.amount}: ${money(f.disputedAmount)}\n   ${t.remedy}: ${remedy(f.action)}`;
+    })
+    .join("\n\n");
+
+  return `${name}
+${t.addr}
+${t.contact}
+
+${today}
+
+${t.to}
+${to}
+
+${recipient === "insurer" ? t.subjectInsurer : t.subjectHospital} — ${ref || t.placeholder.ref}
+
+${t.salutation}
+
+${t.patient}: ${x.patient.name ?? t.placeholder.patient}
+${t.hospital}: ${x.hospital.name ?? t.hospitalPlaceholder}
+${t.stay(x.hospital.admissionDate ?? t.placeholder.date, x.hospital.dischargeDate ?? t.placeholder.date)}
+
+${t.intro(recipient)}
+${t.detailsNote}
+
+${points}
+
+${t.total(money(total))} ${recipient === "insurer" ? t.closingInsurer : t.closingHospital}
+
+${t.enclosures}
+1. ${t.encBill}
+2. ${recipient === "insurer" ? t.encInsurer : t.encHospital}
+
+${t.sign}
 
 ${name}
 `;

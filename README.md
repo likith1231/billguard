@@ -107,7 +107,11 @@ It's built for **Indian health insurance** (INR, IRDAI regulations, CGHS/NPPA-st
 | 🎛️ **Reactive** | The scene follows the mouse, reacts to scroll, speeds up while auditing and settles when the report is ready |
 | 🃏 **3D tilt cards** | Glass cards tilt toward the pointer with a moving highlight |
 | 🧪 **Demo mode** | Runs without an API key on a built-in sample case, so anyone can try it |
-| ⌨️ **Free manual mode** | No documents or API key? Type the bill lines in (or import a CSV) and the rules engine audits them in your browser |
+| ⌨️ **Free manual mode** | No documents or API key? Type the bill lines in, import a CSV, or read a text-based PDF / .txt bill, and the rules engine audits them in your browser |
+| 🏙️ **City & rate tables** | Pick the hospital's city to scale price bands like CGHS tiers, or upload your own CGHS / PPN / NPPA rates as a CSV; anything over your ceiling is flagged |
+| 🌐 **Hindi & Kannada letters** | Draft the dispute letter in English, हिन्दी or ಕನ್ನಡ (AI audits write the whole letter in the language) |
+| 📧 **Email it** | Opens the letter pre-filled in your email app or Gmail; you press send |
+| 🗂️ **My cases** | Save audits, track status, amount recovered and the 15-day escalation reminder at `/cases`, stored only in your browser, with JSON backup |
 | 📱 **Responsive** | From 390px phones to wide desktops; respects `prefers-reduced-motion` |
 
 ---
@@ -228,7 +232,7 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run lint` | ESLint |
-| `npm test` | Vitest: rules engine, party routing, CSV import/export, AI schema limits |
+| `npm test` | Vitest: rules engine, rate tables, bill-text parsing, cases, letters, CSV import/export, AI schema limits |
 
 ---
 
@@ -255,6 +259,8 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 | `insurer_letter` | file(s) | Settlement / deduction letter |
 | `policy` | file(s) | Policy wording |
 | `notes` | string | Optional context from the patient (max 2,000 chars) |
+| `city` | string | Optional hospital city (one of the names in `CITIES`) for tier-adjusted price bands |
+| `rates` | JSON string | Optional custom rate table: `[{ item, high, low?, unit?, source? }]` |
 | `demo` | `"1"` | Return the sample case |
 
 Returns an `AuditResult`: the extraction, ranked `findings[]` (each with `type`, `severity`, `evidence[]`, `disputedAmount`, `lineIds`, `deductionIds`, `action`, `source: "ai" \| "rules"`), `totals` and `mode: "live" \| "demo" \| "manual"`. Limit: 20 MB total.
@@ -263,7 +269,7 @@ Errors: `503` when no API key is configured, `402` when the Anthropic account is
 
 ### `POST /api/letter`
 
-`application/json`: `{ audit, recipient: "insurer" | "hospital", findingIds: string[], sender? }`
+`application/json`: `{ audit, recipient: "insurer" | "hospital", findingIds: string[], sender?, lang?: "en" | "hi" | "kn" }`
 
 Streams the letter as `text/plain`. Sample and manual audits (or a failed AI call) use the built-in template letter.
 
@@ -297,7 +303,11 @@ billguard/
         ├── sample.ts            # Demo-mode sample case
         ├── letter-template.ts   # Demo-mode letter
         ├── export.ts            # CSV / JSON exports
-        ├── manual.ts            # Manual mode: CSV import, form → extraction
+        ├── manual.ts            # Manual mode: CSV / text-bill import, form → extraction
+        ├── pdf-text.ts          # Browser-side PDF text extraction (pdf.js)
+        ├── letter-i18n.ts       # Hindi / Kannada letter wording
+        ├── email.ts             # mailto / Gmail links
+        ├── cases.ts             # Saved cases (localStorage) + backup
         └── __tests__/           # Vitest suites
         └── format.ts            # Money & label helpers
 ```
@@ -336,7 +346,9 @@ billguard/
 - BillGuard gives an **informational audit, not legal or medical advice**. Check each finding before you send a dispute.
 - Benchmarks in [`src/lib/benchmarks.ts`](src/lib/benchmarks.ts) are **indicative ranges, not official tariffs**. Swap in your city's CGHS rates, your insurer's PPN rates or NPPA ceiling prices.
 - Regulatory references are to IRDAI's 2024 Master Circular on Health Insurance; **your policy wording governs**.
-- Uploaded files are processed in memory and sent only to the Anthropic API. BillGuard stores nothing. Manual-mode audits never leave your browser.
+- Uploaded files are processed in memory and sent only to the Anthropic API. BillGuard stores nothing on a server. Manual-mode audits, PDF reading and saved cases stay in your browser.
+- City tiers scale BillGuard's *indicative* bands; they are not CGHS's official city list or rates. For official figures, upload your own rate table.
+- Hindi and Kannada letters are machine-written. Have a fluent reader check them before you send.
 - The sample hospital, insurer and patient are fictitious.
 
 ---
@@ -345,13 +357,15 @@ billguard/
 
 - [x] ⌨️ Free rules-only mode: type the bill in or import a CSV, no API key needed
 - [x] 📄 Export the audit report as PDF
-- [ ] 🔌 Parse text-based PDFs in the free mode too
-- [ ] 🏥 Official CGHS / PPN / NPPA rate tables by city
-- [ ] 📧 Send the letter by email directly from the app
+- [x] 🔌 Parse text-based PDFs in the free mode too (read in the browser with pdf.js)
+- [x] 🏥 City tiers (CGHS-style Tier I/II/III scaling) and your own CGHS / PPN / NPPA rate table as a hard ceiling
+- [x] 📧 Email the letter: opens pre-filled in your email app or Gmail (you press send)
 - [x] 📅 Escalation deadlines & late-settlement interest calculator
 - [x] 📤 CSV / JSON export
-- [ ] 🗃️ Save audits to an account and track dispute status
-- [ ] 🌐 Hindi and Kannada letters
+- [x] 🗃️ Save audits and track dispute status, with a 15-day escalation reminder (stored in your browser, with JSON backup)
+- [x] 🌐 Hindi and Kannada letters
+- [ ] 🔐 Server-side accounts so cases follow you across devices
+- [ ] 📚 Bundled official CGHS / NPPA rate tables (they must be licensed or sourced from the published PDFs)
 
 ---
 

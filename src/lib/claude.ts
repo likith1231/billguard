@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { BENCHMARKS } from "./benchmarks";
+import { LANGS, type Lang } from "./letter-i18n";
 import { Extraction, WireExtraction, type AuditResult } from "./schema";
 
 /** Override with CLAUDE_MODEL, e.g. claude-opus-5-5 (most thorough) or claude-haiku-5-5 (cheapest). */
@@ -124,13 +125,15 @@ Rules:
 - Address it to the recipient requested. For an insurer, address the Grievance Redressal Officer and mention that if unresolved within 15 days the patient may approach the Insurance Ombudsman / IRDAI Bima Bharosa portal. For a hospital, address the Billing / Patient Relations department.
 - Number each disputed point. For each: what was charged or deducted, why it is wrong (cite the evidence and policy clause or regulation given), the exact amount, and the exact remedy requested.
 - End with the total amount requested and a clear deadline for response.
-- Only use facts in the audit data. Never invent clause numbers, amounts, or dates.`;
+- Only use facts in the audit data. Never invent clause numbers, amounts, or dates.
+- Write the entire letter in the language given in the data's "language" field, in a formal register. Keep names, numbers, amounts, dates, policy clause numbers and the acronyms IRDAI and Bima Bharosa as written; render "Insurance Ombudsman" in the target language with the English term in brackets the first time. The "plain text only" rule still applies.`;
 
-export function letterStream(audit: AuditResult, recipient: "insurer" | "hospital", findingIds: string[], sender?: string) {
+export function letterStream(audit: AuditResult, recipient: "insurer" | "hospital", findingIds: string[], sender?: string, lang: Lang = "en") {
   const picked = audit.findings.filter((f) => findingIds.includes(f.id));
   const x = audit.extraction;
   const payload = {
     recipient,
+    language: LANGS.find((l) => l.id === lang)!.name,
     sender: sender || null,
     currency: x.currency,
     patient: x.patient,

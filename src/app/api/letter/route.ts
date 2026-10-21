@@ -1,10 +1,11 @@
 import { hasCredentials, letterStream } from "@/lib/claude";
+import { isLang, type Lang } from "@/lib/letter-i18n";
 import { templateLetter } from "@/lib/letter-template";
 import type { AuditResult } from "@/lib/schema";
 
 export const maxDuration = 120;
 
-type Body = { audit: AuditResult; recipient: "insurer" | "hospital"; findingIds: string[]; sender?: string };
+type Body = { audit: AuditResult; recipient: "insurer" | "hospital"; findingIds: string[]; sender?: string; lang?: Lang };
 
 export async function POST(req: Request) {
   const body = (await req.json()) as Body;
@@ -12,9 +13,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "Pick at least one finding to dispute." }, { status: 400 });
   }
   const recipient = body.recipient === "hospital" ? "hospital" : "insurer";
+  const lang: Lang = isLang(body.lang) ? body.lang : "en";
   const encoder = new TextEncoder();
 
-  const template = () => templateLetter(body.audit, recipient, body.findingIds, body.sender);
+  const template = () => templateLetter(body.audit, recipient, body.findingIds, body.sender, lang);
   // Stream the template in chunks so it feels the same as a live letter.
   const typeOut = async (c: ReadableStreamDefaultController, text: string) => {
     for (let i = 0; i < text.length; i += 24) {
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
     return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
-  const ms = letterStream(body.audit, recipient, body.findingIds, body.sender);
+  const ms = letterStream(body.audit, recipient, body.findingIds, body.sender, lang);
   const stream = new ReadableStream({
     async start(c) {
       let sent = false;

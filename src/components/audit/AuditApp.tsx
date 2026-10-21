@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Background3D from "@/components/ui/Background3D";
+import type { RateContext } from "@/lib/benchmarks";
 import { manualSummary } from "@/lib/manual";
 import { buildAudit } from "@/lib/rules";
 import type { AuditResult, Extraction } from "@/lib/schema";
@@ -14,12 +15,22 @@ import Uploader, { type Files } from "./Uploader";
 type State = { phase: "idle" } | { phase: "scanning" } | { phase: "done"; result: AuditResult } | { phase: "error"; message: string };
 
 const KEY = "billguard:last-audit";
+const RATES_KEY = "billguard:rates";
 
 export default function AuditApp() {
   const params = useSearchParams();
   const [state, setState] = useState<State>({ phase: "idle" });
   const ran = useRef(false);
   const [manual, setManual] = useState(false);
+  const [rates, setRatesState] = useState<RateContext>({});
+  const ratesRef = useRef(rates);
+  const setRates = (r: RateContext) => {
+    ratesRef.current = r;
+    setRatesState(r);
+    try {
+      localStorage.setItem(RATES_KEY, JSON.stringify(r));
+    } catch {}
+  };
 
   const run = useCallback(async (files: Files | null, notes = "") => {
     setState({ phase: "scanning" });
@@ -31,6 +42,9 @@ export default function AuditApp() {
       files.insurer_letter.forEach((f) => fd.append("insurer_letter", f));
       files.policy.forEach((f) => fd.append("policy", f));
       if (notes) fd.set("notes", notes);
+      const r = ratesRef.current;
+      if (r.city) fd.set("city", r.city);
+      if (r.custom?.length) fd.set("rates", JSON.stringify(r.custom));
     }
     try {
       const res = await fetch("/api/audit", { method: "POST", body: fd });
@@ -51,7 +65,7 @@ export default function AuditApp() {
     setState({ phase: "scanning" });
     window.scrollTo({ top: 0, behavior: "smooth" });
     await new Promise((r) => setTimeout(r, 1400));
-    const audit = buildAudit(x, "manual");
+    const audit = buildAudit(x, "manual", ratesRef.current);
     audit.extraction.summary = manualSummary(x, audit.findings.length, audit.totals.recoverable);
     try {
       sessionStorage.setItem(KEY, JSON.stringify(audit));
@@ -62,9 +76,13 @@ export default function AuditApp() {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
+    try {
+      const saved = localStorage.getItem(RATES_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setRates(JSON.parse(saved));
+    } catch {}
     // Runs once after hydration: either start the sample audit or restore this tab's last result.
     if (params.get("sample") === "1") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       run(null);
       return;
     }
@@ -92,7 +110,7 @@ export default function AuditApp() {
         <AnimatePresence mode="wait">
           {state.phase === "idle" || state.phase === "error" ? (
             <motion.div key="up" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20, filter: "blur(6px)" }}>
-              <Uploader onRun={run} onManual={runManual} onModeChange={(m) => setManual(m === "manual")} error={state.phase === "error" ? state.message : null} />
+              <Uploader onRun={run} onManual={runManual} onModeChange={(m) => setManual(m === "manual")} rates={rates} onRates={setRates} error={state.phase === "error" ? state.message : null} />
             </motion.div>
           ) : state.phase === "scanning" ? (
             <motion.div key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

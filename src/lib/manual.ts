@@ -282,3 +282,102 @@ export function manualSummary(x: Extraction, count: number, total: number) {
   if (!count) return "The rules engine found no arithmetic, duplicate, MRP, stay-length, benchmark or settlement problems in what you entered. Upload the documents for an AI audit to also check bundling and policy wording.";
   return `The rules engine found ${count} issue${count > 1 ? "s" : ""} worth about ₹${Math.round(total).toLocaleString("en-IN")} in the ${x.lineItems.length} lines you entered. Manual audits cover maths, duplicates, MRP, stay length, benchmarks and settlement arithmetic; an AI audit of the documents also checks package bundling and policy wording.`;
 }
+
+/* ---------- Reading a bill from text (text-based PDFs and .txt files) ---------- */
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const NUM_TOKEN = /^(?:₹|rs\.?)?\d[\d,]*(?:\.\d+)?$|^[-–—]$/i;
+
+/** Normalises 11-Aug-26, 11/08/2026 (day first) and 2026-08-11 to ISO; anything else → "". */
+export function parseBillDate(s: string): string {
+  const t = s.trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{1,2})[-/ .]([A-Za-z]{3})[a-z]*[-/ .,]*(\d{2,4})/.exec(t);
+  if (m) {
+    const mo = MONTHS.indexOf(m[2].toLowerCase()) + 1;
+    if (!mo) return "";
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return `${y}-${String(mo).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/.exec(t);
+  if (m) {
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+
+const DATE_LEAD = /^(\d{4}-\d{2}-\d{2}|\d{1,2}[-/ .][A-Za-z]{3}[a-z]*[-/ .]\d{2,4}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})\s+/;
+
+/** Parses one bill row such as "12-Aug-26  PH-CTX1  Inj. Ceftriaxone 1g   6  95.00  68.00  570.00". */
+export function parseBillRow(raw: string): LineDraft | null {
+  let rest = raw.trim().replace(/\s+/g, " ");
+  if (!rest || /\b(grand total|sub ?total|net payable|amount payable|balance|advance|discount)\b/i.test(rest)) return null;
+  const toks = rest.split(" ");
+  const nums: string[] = [];
+  while (toks.length > 1 && nums.length < 4 && NUM_TOKEN.test(toks[toks.length - 1])) nums.unshift(toks.pop()!);
+  if (nums.length < 2 || /^[-–—]$/.test(nums[nums.length - 1])) return null;
+  rest = toks.join(" ");
+
+  let date = "";
+  const dm = DATE_LEAD.exec(rest);
+  if (dm) {
+    date = parseBillDate(dm[1]);
+    rest = rest.slice(dm[0].length);
+  }
+  let code = "";
+  const cm = /^([A-Z0-9]{2,}-[A-Z0-9-]+|\d{4,})\s+(?=\S)/.exec(rest);
+  if (cm) {
+    code = cm[1];
+    rest = rest.slice(cm[0].length);
+  }
+  const description = rest.replace(/^[-–—:\s]+|[-–—:\s]+$/g, "");
+  if (!/[a-z]/i.test(description)) return null;
+
+  const v = nums.map((n) => (/^[-–—]$/.test(n) ? null : num(n)));
+  const amount = v[v.length - 1];
+  if (amount === null) return null;
+  const close = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.005);
+  let quantity = 1;
+  let unitPrice = amount;
+  let mrp: number | null = null;
+  if (v.length === 4 && v[0] !== null && v[1] !== null && close(v[0] * v[1], amount)) [quantity, unitPrice, mrp] = [v[0], v[1], v[2]];
+  else if (v.length === 3 && v[0] !== null && v[1] !== null && close(v[0] * v[1], amount)) [quantity, unitPrice] = [v[0], v[1]];
+  const out = (n: number | null) => (n === null ? "" : String(n));
+  return {
+    date,
+    description,
+    code,
+    category: guessCategory(description),
+    quantity: String(quantity),
+    unitPrice: String(unitPrice),
+    amount: String(amount),
+    mrp: out(mrp),
+  };
+}
+
+/**
+ * Best-effort reader for a pasted or extracted text bill: the header details plus the line items.
+ * It only covers well-formed tabular bills; the user reviews and edits the result in the form.
+ */
+export function draftFromBillText(text: string): { fields: Partial<ManualDraft>; lines: LineDraft[] } {
+  const rows = text.split(/\r?\n/);
+  const lines = rows.map(parseBillRow).filter((l): l is LineDraft => l !== null);
+  const fields: Partial<ManualDraft> = {};
+  const first = rows.map((r) => r.trim()).find((r) => /[a-z]{3}/i.test(r));
+  if (first && !parseBillRow(first)) fields.hospitalName = first.replace(/\s*\((sample|fictitious)[^)]*\)/i, "").replace(/\s*[—-]\s*SAMPLE.*$/i, "").trim();
+  const pick = (re: RegExp) => re.exec(text)?.[1]?.trim();
+  fields.billNumber = pick(/bill\s*(?:no|number|#)\.?\s*[:\-]?\s*([A-Za-z0-9/_-]+)/i);
+  fields.policyNumber = pick(/policy\s*(?:no|number|#)\.?\s*[:\-]?\s*([A-Za-z0-9/_-]+)/i);
+  fields.claimNumber = pick(/claim\s*(?:no|number|#)\.?\s*[:\-]?\s*([A-Za-z0-9/_-]+)/i);
+  fields.patientName = pick(/patient(?:\s*name)?\s*[:\-]\s*([A-Za-z.' ]+?)(?:\s{2,}|\s+(?:age|sex|uhid|gender)\b|$)/im);
+  const adm = pick(/(?:admission|admitted|doa)\s*(?:date)?\s*[:\-]?\s*(\d{1,2}[-/ .][A-Za-z0-9]{2,3}[a-z]*[-/ .]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
+  const dis = pick(/(?:discharge|discharged|dod)\s*(?:date)?\s*[:\-]?\s*(\d{1,2}[-/ .][A-Za-z0-9]{2,3}[a-z]*[-/ .]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
+  if (adm) fields.admissionDate = parseBillDate(adm);
+  if (dis) fields.dischargeDate = parseBillDate(dis);
+  const total = pick(/grand total\s*[:\-]?\s*(?:₹|rs\.?)?\s*([\d,]+(?:\.\d+)?)/i);
+  if (total) fields.billedTotal = String(num(total));
+  for (const k of Object.keys(fields) as (keyof ManualDraft)[]) if (!fields[k]) delete fields[k];
+  return { fields, lines };
+}

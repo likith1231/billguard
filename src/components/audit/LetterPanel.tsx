@@ -1,9 +1,13 @@
 "use client";
 
-import { Check, Copy, Download, Landmark, Loader2, Printer, Receipt, Wand2 } from "lucide-react";
+import { BookmarkCheck, Check, Copy, Download, Landmark, Loader2, Mail, Printer, Receipt, Send, Wand2 } from "lucide-react";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { saveCase } from "@/lib/cases";
+import { emailSubject, gmailUrl, looksLikeEmail, mailtoUrl } from "@/lib/email";
 import { money } from "@/lib/format";
+import { LANGS, type Lang } from "@/lib/letter-i18n";
 import { partyFor } from "@/lib/rules";
 import type { AuditResult } from "@/lib/schema";
 import { printView } from "./ReportPrint";
@@ -26,6 +30,10 @@ export default function LetterPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [lang, setLang] = useState<Lang>("en");
+  const [to, setTo] = useState("");
+  const [mailNote, setMailNote] = useState<string | null>(null);
+  const [sentFor, setSentFor] = useState<Recipient | null>(null);
   const abort = useRef<AbortController | null>(null);
 
   const forRecipient = result.findings.filter((f) => partyFor(f) === recipient);
@@ -49,7 +57,7 @@ export default function LetterPanel({
       const res = await fetch("/api/letter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audit: result, recipient, findingIds: picked.map((f) => f.id), sender }),
+        body: JSON.stringify({ audit: result, recipient, findingIds: picked.map((f) => f.id), sender, lang }),
         signal: ctl.signal,
       });
       if (!res.ok || !res.body) {
@@ -85,6 +93,27 @@ export default function LetterPanel({
     setTimeout(() => setCopied(false), 1600);
   }
 
+  // BillGuard has no mail server: the letter opens pre-filled in the user's own email app or Gmail.
+  const subject = emailSubject(result, recipient, lang);
+  async function openMail(kind: "app" | "gmail") {
+    setMailNote(null);
+    if (kind === "gmail") {
+      window.open(gmailUrl(to, subject, text), "_blank", "noopener");
+      return;
+    }
+    const { href, fits } = mailtoUrl(to, subject, text);
+    if (!fits) {
+      await navigator.clipboard.writeText(text).catch(() => {});
+      setMailNote("The letter is long, so it was copied to your clipboard. Paste it into the email body.");
+    }
+    window.location.href = href;
+  }
+
+  function markSent() {
+    saveCase(result, { status: recipient === "insurer" ? "sent_insurer" : "sent_hospital", sentOn: new Date().toISOString().slice(0, 10) });
+    setSentFor(recipient);
+  }
+
   return (
     <section id="letter" className="mt-16 scroll-mt-28">
       <p className="font-mono text-xs tracking-[0.3em] text-mint">DISPUTE LETTER</p>
@@ -111,6 +140,30 @@ export default function LetterPanel({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium">Language</p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {LANGS.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setLang(l.id)}
+                  aria-pressed={lang === l.id}
+                  className={`rounded-xl border px-3 py-2.5 text-sm transition ${lang === l.id ? "border-mint/60 bg-mint/10 text-mint" : "border-line text-ink-2 hover:text-ink"}`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            {lang !== "en" && (
+              <p className="mt-2 text-xs text-muted">
+                {result.mode === "live"
+                  ? "Written by AI. Have someone who reads the language check it before you send."
+                  : "Without an AI audit only the letter frame is translated; the details of each point stay in English. An AI audit writes the whole letter in the language."}
+              </p>
+            )}
           </div>
 
           <label className="block">
@@ -173,6 +226,44 @@ export default function LetterPanel({
         </div>
 
         <div style={{ perspective: 1400 }}>
+          {text && !busy && (
+            <div className="glass mb-4 rounded-3xl p-4 print:hidden">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="min-w-56 flex-1 text-xs text-muted">
+                  Send to ({recipient === "insurer" ? "insurer's grievance email" : "hospital's billing email"})
+                  <input
+                    type="email"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                    placeholder={recipient === "insurer" ? "grievance@insurer.com" : "billing@hospital.com"}
+                    className="mt-1 w-full rounded-lg border border-line bg-white/[0.03] px-2.5 py-2 text-sm text-ink outline-none placeholder:text-muted/70 focus:border-mint/50"
+                  />
+                </label>
+                <button type="button" disabled={!looksLikeEmail(to)} onClick={() => openMail("app")} className="inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-sm font-semibold text-black enabled:hover:brightness-110 disabled:opacity-40">
+                  <Mail className="h-4 w-4" /> Open in email app
+                </button>
+                <button type="button" disabled={!looksLikeEmail(to)} onClick={() => openMail("gmail")} className="glass inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-40">
+                  <Send className="h-4 w-4" /> Gmail
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-muted">Your email app opens with the letter filled in. You press send, so nothing leaves BillGuard on its own. Attach the bill and insurer letter yourself.</p>
+              {mailNote && <p className="mt-1 text-xs text-amber">{mailNote}</p>}
+              <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3 text-sm">
+                {sentFor === recipient ? (
+                  <span className="inline-flex items-center gap-2 text-mint">
+                    <BookmarkCheck className="h-4 w-4" /> Saved as sent. We&apos;ll remind you at 15 days.{" "}
+                    <Link href="/cases" className="underline underline-offset-2">
+                      View cases
+                    </Link>
+                  </span>
+                ) : (
+                  <button type="button" onClick={markSent} className="inline-flex items-center gap-2 text-ink-2 hover:text-mint">
+                    <BookmarkCheck className="h-4 w-4" /> I sent this letter — track it
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div
             className="relative min-h-[32rem] rounded-3xl border border-white/10 bg-[#f6f4ee] p-6 text-[#1b1d22] shadow-[0_40px_120px_-30px_rgba(77,255,181,0.35)] transition-transform duration-700 md:p-10"
             style={{ transform: text ? "rotateX(0deg)" : "rotateX(8deg) translateY(10px)" }}

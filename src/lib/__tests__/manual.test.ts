@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findingsCsv, linesCsv } from "../export";
-import { CSV_TEMPLATE, draftToExtraction, emptyDraft, extractionToDraft, guessCategory, linesFromCsv, num, parseCsv } from "../manual";
+import { readFileSync } from "node:fs";
+import { CSV_TEMPLATE, draftFromBillText, draftToExtraction, emptyDraft, extractionToDraft, guessCategory, linesFromCsv, num, parseCsv } from "../manual";
 import { buildAudit } from "../rules";
 import { SAMPLE_EXTRACTION } from "../sample";
 
@@ -62,5 +63,30 @@ describe("manual draft", () => {
     const x = draftToExtraction(d);
     expect(x.lineItems).toHaveLength(1);
     expect(x.lineItems[0]).toMatchObject({ id: "L1", amount: 1300, date: null });
+  });
+});
+
+describe("reading a bill from text", () => {
+  const sample = readFileSync("public/samples/hospital-bill.txt", "utf8");
+
+  it("reads the header and every line of the sample bill", () => {
+    const { fields, lines } = draftFromBillText(sample);
+    expect(lines).toHaveLength(15);
+    expect(fields).toMatchObject({ billNumber: "SMH/IP/26/07712", policyNumber: "NSH/2023/448812", patientName: "Ananya Rao", admissionDate: "2026-08-11", dischargeDate: "2026-08-14", billedTotal: "173500" });
+    expect(fields.hospitalName).toMatch(/^SUNRISE MULTISPECIALITY HOSPITAL/);
+  });
+
+  it("matches the hand-entered sample extraction", () => {
+    const { lines } = draftFromBillText(sample);
+    const ceftriaxone = lines.find((l) => /ceftriaxone/i.test(l.description))!;
+    expect(ceftriaxone).toMatchObject({ date: "2026-08-12", code: "PH-CTX1", quantity: "6", unitPrice: "95", mrp: "68", amount: "570", category: "pharmacy" });
+    const room = lines[0];
+    expect(room).toMatchObject({ quantity: "5", unitPrice: "7500", amount: "37500", mrp: "" });
+    expect(lines.reduce((s, l) => s + Number(l.amount), 0)).toBe(173500);
+  });
+
+  it("ignores totals and prose, and copes with two-column rows", () => {
+    expect(draftFromBillText("GRAND TOTAL 1,000\nPackage note: includes OT charges\n").lines).toHaveLength(0);
+    expect(draftFromBillText("X-Ray chest 450 450\n").lines[0]).toMatchObject({ description: "X-Ray chest", quantity: "1", amount: "450" });
   });
 });

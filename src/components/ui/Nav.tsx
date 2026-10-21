@@ -14,6 +14,7 @@ export default function Nav() {
           <Link href="/#checks" className="transition hover:text-ink">What we catch</Link>
           <Link href="/#evidence" className="transition hover:text-ink">Evidence</Link>
           <Link href="/#privacy" className="transition hover:text-ink">Privacy</Link>
+          <Link href="/cases" className="transition hover:text-ink">My cases</Link>
         </div>
         <Link
           href="/audit"

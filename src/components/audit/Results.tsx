@@ -1,9 +1,11 @@
 "use client";
 
-import { Download, FileText, ListChecks, Route, RotateCcw, Table2, Wallet } from "lucide-react";
+import { BookmarkCheck, BookmarkPlus, Download, FileText, ListChecks, Route, RotateCcw, Table2, Wallet } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import Counter from "@/components/ui/Counter";
 import TiltCard from "@/components/ui/TiltCard";
+import { listCases, saveCase } from "@/lib/cases";
 import { download, findingsCsv, linesCsv } from "@/lib/export";
 import { money } from "@/lib/format";
 import { partyFor } from "@/lib/rules";
@@ -27,6 +29,7 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
   const cur = x.currency;
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("findings");
   const [selected, setSelected] = useState<Set<string>>(() => new Set(result.findings.map((f) => f.id)));
+  const [saved, setSaved] = useState(() => (typeof window === "undefined" ? false : listCases().some((c) => c.id === result.generatedAt)));
   const [party, setParty] = useState<"all" | "hospital" | "insurer">("all");
 
   const byParty = useMemo(() => {
@@ -81,6 +84,22 @@ export default function Results({ result, onReset }: { result: AuditResult; onRe
           <a href="#letter" className="inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-sm font-semibold text-black hover:brightness-110">
             <FileText className="h-4 w-4" /> Draft letter
           </a>
+          {saved ? (
+            <Link href="/cases" className="glass inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-mint hover:bg-white/5">
+              <BookmarkCheck className="h-4 w-4" /> Saved · view cases
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                saveCase(result);
+                setSaved(true);
+              }}
+              className="glass inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5"
+            >
+              <BookmarkPlus className="h-4 w-4" /> Save case
+            </button>
+          )}
           <details className="relative">
             <summary className="glass inline-flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm hover:bg-white/5 [&::-webkit-details-marker]:hidden">
               <Download className="h-4 w-4" /> Export

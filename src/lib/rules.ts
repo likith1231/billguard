@@ -1,4 +1,4 @@
-import { findBenchmark } from "./benchmarks";
+import { cityTier, findBenchmark, type RateContext } from "./benchmarks";
 import type { AuditFinding, AuditResult, Extraction, Finding, LineItem } from "./schema";
 
 /**
@@ -21,7 +21,7 @@ function rule(f: Omit<Finding, "deductionIds" | "policyClause"> & Partial<Findin
   return { deductionIds: [], policyClause: null, ...f };
 }
 
-export function runRules(x: Extraction): Finding[] {
+export function runRules(x: Extraction, rates: RateContext = {}): Finding[] {
   const out: Finding[] = [];
   const cur = x.currency || "INR";
   const money = (n: number) => `${cur} ${fmt(n).toLocaleString("en-IN")}`;
@@ -107,16 +107,19 @@ export function runRules(x: Extraction): Finding[] {
     }
   }
 
-  // 5. Benchmark outliers (> 1.5× the top of the indicative band).
+  // 5. Benchmark outliers (> 1.5× the top of the indicative band, or above a user-supplied ceiling).
   for (const li of x.lineItems) {
-    const b = findBenchmark(li.description);
-    if (!b || li.unitPrice <= b.high * 1.5) continue;
+    const b = findBenchmark(li.description, rates);
+    const margin = b?.strict ? 1 : 1.5;
+    if (!b || li.unitPrice <= b.high * margin) continue;
     out.push(rule({
       type: "overcharge_vs_benchmark",
       severity: li.unitPrice > b.high * 3 ? "high" : "medium",
-      title: `${li.description} priced ${(li.unitPrice / b.high).toFixed(1)}× the usual range`,
-      explanation: `${b.label} typically costs ${money(b.low)}–${money(b.high)} per ${b.unit} (${b.source}). You were charged ${money(li.unitPrice)}.`,
-      evidence: [`${li.id}: ${li.description} @ ${li.unitPrice}`, `Benchmark: ${b.label} ${b.low}–${b.high}/${b.unit}`],
+      title: `${li.description} priced ${(li.unitPrice / b.high).toFixed(1)}× ${b.strict ? "your rate ceiling" : "the usual range"}`,
+      explanation: b.strict
+        ? `${b.label} is capped at ${money(b.high)} per ${b.unit} in ${b.source}. You were charged ${money(li.unitPrice)}.`
+        : `${b.label} typically costs ${money(b.low)}–${money(b.high)} per ${b.unit} (${b.source}). You were charged ${money(li.unitPrice)}.`,
+      evidence: [`${li.id}: ${li.description} @ ${li.unitPrice}`, b.strict ? `Ceiling: ${b.label} ${b.high}/${b.unit} (${b.source})` : `Benchmark: ${b.label} ${b.low}–${b.high}/${b.unit}`],
       disputedAmount: fmt((li.unitPrice - b.high) * li.quantity),
       lineIds: [li.id],
       action: `Ask the hospital to justify the rate or bill line ${li.id} at its published tariff.`,
@@ -252,10 +255,10 @@ export function partyFor(f: Pick<Finding, "type" | "deductionIds" | "lineIds" | 
 }
 
 /** Merge AI and rule findings, dropping rule findings that duplicate an AI one. */
-export function buildAudit(x: Extraction, mode: AuditResult["mode"]): AuditResult {
+export function buildAudit(x: Extraction, mode: AuditResult["mode"], rates: RateContext = {}): AuditResult {
   const ai = x.findings;
   const sameAmount = (a: Finding, r: Finding) => Math.abs(a.disputedAmount - r.disputedAmount) < 1;
-  const rules = runRules(x).filter(
+  const rules = runRules(x, rates).filter(
     (r) =>
       !ai.some(
         (a) =>
@@ -289,6 +292,7 @@ export function buildAudit(x: Extraction, mode: AuditResult["mode"]): AuditResul
       flaggedLines: new Set(findings.flatMap((f) => f.lineIds)).size,
     },
     mode,
+    rates: { city: rates.city ?? null, tier: cityTier(rates.city), customRates: rates.custom?.length ?? 0 },
     generatedAt: new Date().toISOString(),
   };
 }
