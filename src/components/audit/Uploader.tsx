@@ -1,8 +1,10 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Download, FileCheck2, FileSearch, Keyboard, Landmark, Receipt, ScrollText, Sparkles, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Download, FileCheck2, FileSearch, Keyboard, Landmark, Lock, Receipt, ScrollText, Sparkles, X } from "lucide-react";
+import Link from "next/link";
 import { useRef, useState, type ComponentType } from "react";
 import TiltCard from "@/components/ui/TiltCard";
+import { useAuth } from "@/lib/auth/client";
 import type { RateContext } from "@/lib/benchmarks";
 import type { Extraction } from "@/lib/schema";
 import ManualEntry from "./ManualEntry";
@@ -106,7 +108,10 @@ export default function Uploader({
   const [files, setFiles] = useState<Files>({ bill: [], insurer_letter: [], policy: [] });
   const [notes, setNotes] = useState("");
   const [mode, setMode] = useState<"upload" | "manual">("upload");
-  const ready = files.bill.length > 0;
+  const { loading, configured, user, usage } = useAuth();
+  // The AI audit needs an account; the sample case and the manual mode do not.
+  const locked = !loading && configured && !user;
+  const ready = files.bill.length > 0 && !locked;
 
   const header = (
     <>
@@ -178,7 +183,34 @@ export default function Uploader({
       <div>
         {header}
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+        {locked && (
+          <div className="glass mt-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border-mint/30 p-4 md:p-5">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-mint/15">
+                <Lock className="h-4 w-4 text-mint" />
+              </div>
+              <div>
+                <p className="font-medium">Sign in to run an AI audit</p>
+                <p className="mt-0.5 text-sm text-ink-2">It&apos;s free. The sample case and the manual mode below need no account.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Link href="/login?next=/audit" className="rounded-xl bg-mint px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110">
+                Sign in
+              </Link>
+              <Link href="/signup?next=/audit" className="rounded-xl border border-line px-4 py-2 text-sm text-ink-2 transition hover:border-line-2 hover:text-ink">
+                Create account
+              </Link>
+            </div>
+          </div>
+        )}
+        {!locked && user && usage && (
+          <p className="mt-8 text-xs text-muted">
+            Signed in as {user.email} · {usage.audit.used} of {usage.audit.limit} AI audits used today
+          </p>
+        )}
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
           {SLOTS.map((s) => (
             <Slot
               key={s.role}
@@ -209,6 +241,7 @@ export default function Uploader({
             onClick={() => onRun(files, notes)}
             className="inline-flex items-center gap-2 rounded-2xl bg-mint px-6 py-3.5 font-semibold text-black shadow-[0_0_40px_-10px_var(--mint)] transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
+            {locked ? <Lock className="h-4 w-4" /> : null}
             Run audit <ArrowRight className="h-4 w-4" />
           </button>
           <button type="button" onClick={() => onRun(null)} className="glass inline-flex items-center gap-2 rounded-2xl px-5 py-3.5 font-medium hover:bg-white/5">

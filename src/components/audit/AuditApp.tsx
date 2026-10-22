@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Background3D from "@/components/ui/Background3D";
+import { refreshMe, setUser } from "@/lib/auth/client";
 import type { RateContext } from "@/lib/benchmarks";
 import { manualSummary } from "@/lib/manual";
 import { buildAudit } from "@/lib/rules";
@@ -49,7 +50,13 @@ export default function AuditApp() {
     try {
       const res = await fetch("/api/audit", { method: "POST", body: fd });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `Audit failed (${res.status})`);
+      if (!res.ok) {
+        // An expired session or a used-up daily quota changes what the page should show.
+        if (res.status === 401) setUser(null);
+        if (res.status === 429) void refreshMe();
+        throw new Error(body.error ?? `Audit failed (${res.status})`);
+      }
+      if (files) void refreshMe();
       const result = body as AuditResult;
       try {
         sessionStorage.setItem(KEY, JSON.stringify(result));
