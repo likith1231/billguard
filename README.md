@@ -207,6 +207,7 @@ On `/audit`, **Enter manually** skips the AI entirely: type the bill lines (or i
 
 - **Node.js 20+**
 - An **Anthropic API key** (optional: without one the app runs in demo mode)
+- A **Postgres database** for accounts (optional locally: without `DATABASE_URL` the AI audit is open to you on your own machine; in production it is required)
 
 ### Install & run
 
@@ -214,9 +215,20 @@ On `/audit`, **Enter manually** skips the AI entirely: type the bill lines (or i
 git clone https://github.com/likith1231/billguard.git
 cd billguard
 npm install
-cp .env.example .env.local     # add your ANTHROPIC_API_KEY
+cp .env.example .env.local     # add your ANTHROPIC_API_KEY (and DATABASE_URL + AUTH_SECRET for accounts)
 npm run dev
 ```
+
+A throwaway local Postgres for accounts:
+
+```bash
+docker run -d --name bg-pg -e POSTGRES_PASSWORD=devpw -e POSTGRES_DB=billguard -p 127.0.0.1:55432:5432 postgres:16-alpine
+# .env.local
+DATABASE_URL=postgres://postgres:devpw@127.0.0.1:55432/billguard
+AUTH_SECRET=<openssl rand -hex 32>
+```
+
+The tables are created on first use; [`db/schema.sql`](db/schema.sql) has the same schema if you prefer to create them yourself.
 
 Open **http://localhost:3000**, or jump straight to the sample case at **http://localhost:3000/audit?sample=1**.
 
@@ -232,7 +244,8 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run lint` | ESLint |
-| `npm test` | Vitest: rules engine, rate tables, bill-text parsing, cases, letters, CSV import/export, AI schema limits |
+| `npm test` | Vitest: rules engine, rate tables, bill-text parsing, cases, letters, CSV import/export, AI schema limits, password and session handling |
+| `TEST_DATABASE_URL=… npm test` | Also runs the account and AI-gate tests against a real Postgres (sign-up, lockout, quotas, password change, deletion) |
 
 ---
 
@@ -242,8 +255,33 @@ Open **http://localhost:3000**, or jump straight to the sample case at **http://
 |---|---|---|
 | `ANTHROPIC_API_KEY` | No | Enables AI audits of uploaded documents and AI-written letters. **Without it**, the sample case and the free manual mode still work, and letters use a deterministic template. |
 | `CLAUDE_MODEL` | No | Model for audits and letters. Default `claude-sonnet-5-5`; use `claude-opus-5-5` for the most thorough audits or `claude-haiku-5-5` for the cheapest. |
+| `DATABASE_URL` | **Yes in production** | Postgres for accounts (Neon's pooled connection string works). Without it in production the AI audit is switched off; the sample case and manual mode still work. |
+| `AUTH_SECRET` | **Yes in production** | Random string of 32+ characters that signs session cookies (`openssl rand -hex 32`). Changing it signs everyone out. |
+| `AI_AUDIT_DAILY_LIMIT` | No | AI audits per account per day (UTC). Default `10`. |
+| `AI_LETTER_DAILY_LIMIT` | No | AI-written letters per account per day. Default `30`; after that the free template letter is served. |
+| `AI_AUDIT_GLOBAL_DAILY_LIMIT` | No | AI audits per day across **all** accounts, a ceiling on your Anthropic bill. Default `200`. |
+| `AI_LETTER_GLOBAL_DAILY_LIMIT` | No | The same ceiling for letters. Default `600`. |
 
 > 🔒 `.env.local` is git-ignored. Never commit your key.
+
+---
+
+## 🔑 Accounts
+
+The AI audit and AI-written letters cost money per request, so they need a free account. Everything else stays open:
+the sample case, the manual rules-only audit, template letters, exports and saved cases need no account.
+
+| | |
+|---|---|
+| **Sign-up / sign-in** | Email and password. Passwords are hashed with **Argon2id** (OWASP profile); a login for an unknown email takes the same time and gets the same answer as a wrong password. |
+| **Sessions** | A signed JWT (HS256) in an `HttpOnly`, `SameSite=Lax`, `Secure` `__Host-` cookie, valid 7 days. State-changing requests must come from this site (Origin / Sec-Fetch-Site check). |
+| **Lockout** | 5 failed sign-ins per account or 20 per network address in 15 minutes pause sign-in for that window; 10 sign-ups per address per hour. |
+| **AI quota** | Per account per day (default 10 audits, 30 letters) plus a ceiling across all accounts. Reserved atomically, so parallel requests cannot slip past it, and given back when the AI service fails. |
+| **Account page** (`/account`) | Today's AI use, change password (signs out other devices), sign out everywhere, delete account. |
+| **What is stored** | Email, optional name, password hash, a token version, failed-login counters (kept 2 days) and per-day AI counts. No bills, audits or letters. |
+
+Not included yet: email verification and password reset by email (they need a mail service). If you forget your password,
+an operator can delete the account row so you can sign up again.
 
 ---
 
@@ -337,7 +375,8 @@ billguard/
 
 | Part | Platform | Notes |
 |---|---|---|
-| 🖥️ App + API | **Vercel** (or any Node host) | Set `ANTHROPIC_API_KEY` in the project's environment variables. `/api/audit` sets `maxDuration = 300`, so long bills need a plan that allows 5-minute functions. |
+| 🖥️ App + API | **Vercel** (or any Node host) | Set `ANTHROPIC_API_KEY`, `DATABASE_URL` and `AUTH_SECRET` in the project's environment variables. `/api/audit` sets `maxDuration = 300`, so long bills need a plan that allows 5-minute functions. |
+| 🗄️ Accounts DB | **Neon** (free tier) or any Postgres 13+ | Create a database, copy its **pooled** connection string into `DATABASE_URL`. Tables are created on first request. |
 
 ---
 
@@ -346,7 +385,7 @@ billguard/
 - BillGuard gives an **informational audit, not legal or medical advice**. Check each finding before you send a dispute.
 - Benchmarks in [`src/lib/benchmarks.ts`](src/lib/benchmarks.ts) are **indicative ranges, not official tariffs**. Swap in your city's CGHS rates, your insurer's PPN rates or NPPA ceiling prices.
 - Regulatory references are to IRDAI's 2024 Master Circular on Health Insurance; **your policy wording governs**.
-- Uploaded files are processed in memory and sent only to the Anthropic API. BillGuard stores nothing on a server. Manual-mode audits, PDF reading and saved cases stay in your browser.
+- Uploaded files are processed in memory and sent only to the Anthropic API. The server stores only your account (email, optional name, password hash) and daily AI counts, never a bill, audit or letter. Manual-mode audits, PDF reading and saved cases stay in your browser, and signing out clears the last report from the tab.
 - City tiers scale BillGuard's *indicative* bands; they are not CGHS's official city list or rates. For official figures, upload your own rate table.
 - Hindi and Kannada letters are machine-written. Have a fluent reader check them before you send.
 - The sample hospital, insurer and patient are fictitious.
@@ -364,7 +403,9 @@ billguard/
 - [x] 📤 CSV / JSON export
 - [x] 🗃️ Save audits and track dispute status, with a 15-day escalation reminder (stored in your browser, with JSON backup)
 - [x] 🌐 Hindi and Kannada letters
-- [ ] 🔐 Server-side accounts so cases follow you across devices
+- [x] 🔑 Accounts for the AI features: sign-up, sign-in, lockout, daily AI quotas, change password, sign out everywhere, delete account
+- [ ] 🔐 Saved cases stored with the account so they follow you across devices
+- [ ] 📧 Email verification and password reset (needs a mail service)
 - [ ] 📚 Bundled official CGHS / NPPA rate tables (they must be licensed or sourced from the published PDFs)
 
 ---

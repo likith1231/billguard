@@ -1,4 +1,6 @@
 import { hasCredentials, letterStream } from "@/lib/claude";
+import { requireUser } from "@/lib/auth/guard";
+import { consumeQuota, refundQuota } from "@/lib/auth/limits";
 import { isLang, type Lang } from "@/lib/letter-i18n";
 import { templateLetter } from "@/lib/letter-template";
 import type { AuditResult } from "@/lib/schema";
@@ -35,6 +37,24 @@ export async function POST(req: Request) {
     return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
+  // A letter written by Claude needs an account (it costs money). Without one, or once today's AI letters are used up,
+  // the free template letter is served instead of an error: nobody is left without a letter.
+  const templateResponse = (why: "template-signin" | "template-quota") => {
+    const stream = new ReadableStream({
+      async start(c) {
+        await typeOut(c, template());
+        c.close();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Letter-Source": why } });
+  };
+  const auth = await requireUser(req, "AI-written letters");
+  if (!auth.ok) return templateResponse("template-signin");
+  if (!auth.dev) {
+    const quota = await consumeQuota(auth.user.id, "letter");
+    if (!quota.allowed) return templateResponse("template-quota");
+  }
+
   const ms = letterStream(body.audit, recipient, body.findingIds, body.sender, lang);
   const stream = new ReadableStream({
     async start(c) {
@@ -49,7 +69,10 @@ export async function POST(req: Request) {
       } catch (e) {
         console.error(e);
         // If the AI failed before writing anything (no credits, outage), fall back to the template.
-        if (!sent) await typeOut(c, template());
+        if (!sent) {
+          if (!auth.dev) await refundQuota(auth.user.id, "letter").catch(() => undefined);
+          await typeOut(c, template());
+        }
         else c.enqueue(encoder.encode("\n\n[Letter generation was interrupted — please try again.]"));
       }
       c.close();

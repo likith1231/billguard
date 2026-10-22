@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { AuditError, extractAndAudit, hasCredentials, type UploadedDoc } from "@/lib/claude";
 import { z } from "zod";
+import { requireUser } from "@/lib/auth/guard";
+import { consumeQuota, refundQuota } from "@/lib/auth/limits";
 import { CITIES, type RateContext } from "@/lib/benchmarks";
 import { buildAudit } from "@/lib/rules";
 import { SAMPLE_EXTRACTION } from "@/lib/sample";
@@ -23,7 +25,14 @@ function ratesFrom(form: FormData): RateContext {
   return { city: CITIES.some((c) => c.name === city) ? city : null, custom };
 }
 
+// A demo request is a few hundred bytes. Anything bigger is a real upload: refuse it before reading it if nobody is signed in.
+const DEMO_MAX_BODY = 64 * 1024;
+
 export async function POST(req: Request) {
+  if (Number(req.headers.get("content-length") ?? 0) > DEMO_MAX_BODY) {
+    const early = await requireUser(req);
+    if (!early.ok) return early.response;
+  }
   const form = await req.formData();
 
   if (form.get("demo") === "1") {
@@ -38,6 +47,9 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
+
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
 
   const docs: UploadedDoc[] = [];
   let total = 0;
@@ -59,20 +71,49 @@ export async function POST(req: Request) {
     return Response.json({ error: "Files are over 20 MB in total. Compress or split them." }, { status: 413 });
   }
 
+  // Reserve one of today's AI audits. Local development without a database has no accounts, so no quota.
+  if (!auth.dev) {
+    const quota = await consumeQuota(auth.user.id, "audit");
+    if (!quota.allowed) {
+      const error =
+        quota.reason === "user"
+          ? `You've used your ${quota.limit} AI audits for today. The count resets at midnight UTC. The free manual mode has no limit.`
+          : "The AI audit has reached its daily capacity for everyone. Try again tomorrow, or use the free manual mode.";
+      return Response.json({ error, code: "quota", limit: quota.limit }, { status: 429 });
+    }
+  }
+  // Hand the reservation back when the failure is on the AI service's side, not the request's.
+  const refund = () => (auth.dev ? undefined : refundQuota(auth.user.id, "audit").catch(() => undefined));
+
   try {
     const notes = String(form.get("notes") ?? "").slice(0, 2000) || undefined;
     const extraction = await extractAndAudit(docs, notes);
     return Response.json(buildAudit(extraction, "live", ratesFrom(form)));
   } catch (e) {
-    if (e instanceof AuditError) return Response.json({ error: e.message }, { status: e.status });
-    if (e instanceof Anthropic.RateLimitError) return Response.json({ error: "Rate limited — try again in a minute." }, { status: 429 });
-    if (e instanceof Anthropic.AuthenticationError) return Response.json({ error: "The server's Anthropic API key is invalid." }, { status: 500 });
+    if (e instanceof AuditError) {
+      if (e.status >= 500) await refund();
+      return Response.json({ error: e.message }, { status: e.status });
+    }
+    if (e instanceof Anthropic.RateLimitError) {
+      await refund();
+      return Response.json({ error: "Rate limited — try again in a minute." }, { status: 429 });
+    }
+    if (e instanceof Anthropic.AuthenticationError) {
+      console.error("Anthropic rejected the server's API key (ANTHROPIC_API_KEY)");
+      await refund();
+      return Response.json({ error: "The server's Anthropic API key is invalid." }, { status: 500 });
+    }
     if (e instanceof Anthropic.BadRequestError && /credit balance/i.test(e.message)) {
+      await refund();
       return Response.json({ error: "The AI service is out of credits right now. Try the sample case, or enter the bill manually for a free rules-only audit." }, { status: 402 });
     }
     if (e instanceof Anthropic.BadRequestError) return Response.json({ error: `The AI service rejected the request: ${e.message}` }, { status: 400 });
-    if (e instanceof Anthropic.APIError) return Response.json({ error: "The AI service is unavailable right now." }, { status: 502 });
+    if (e instanceof Anthropic.APIError) {
+      await refund();
+      return Response.json({ error: "The AI service is unavailable right now." }, { status: 502 });
+    }
     console.error(e);
+    await refund();
     return Response.json({ error: "Something went wrong while auditing." }, { status: 500 });
   }
 }

@@ -29,6 +29,7 @@ export default function LetterPanel({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [lang, setLang] = useState<Lang>("en");
   const [to, setTo] = useState("");
@@ -52,6 +53,7 @@ export default function LetterPanel({
     abort.current = ctl;
     setBusy(true);
     setError(null);
+    setSource(null);
     setText("");
     try {
       const res = await fetch("/api/letter", {
@@ -64,6 +66,7 @@ export default function LetterPanel({
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error ?? "Couldn't draft the letter.");
       }
+      setSource(res.headers.get("X-Letter-Source"));
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       for (;;) {
@@ -223,6 +226,12 @@ export default function LetterPanel({
             {busy ? "Drafting…" : text ? "Redraft letter" : "Draft letter"}
           </button>
           {error && <p className="text-sm text-coral">{error}</p>}
+          {!error && source === "template-signin" && (
+            <p className="text-sm text-ink-2">
+              This is the template letter. <Link href="/login?next=/audit" className="font-medium text-mint hover:underline">Sign in</Link> to have Claude write one around your exact findings.
+            </p>
+          )}
+          {!error && source === "template-quota" && <p className="text-sm text-ink-2">You&apos;ve used today&apos;s AI-written letters, so this is the template letter. The AI count resets at midnight UTC.</p>}
         </div>
 
         <div style={{ perspective: 1400 }}>

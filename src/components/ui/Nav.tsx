@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AccountMenu from "@/components/auth/AccountMenu";
 import Logo from "./Logo";
 
 export default function Nav() {
@@ -16,12 +17,15 @@ export default function Nav() {
           <Link href="/#privacy" className="transition hover:text-ink">Privacy</Link>
           <Link href="/cases" className="transition hover:text-ink">My cases</Link>
         </div>
-        <Link
-          href="/audit"
-          className="rounded-xl bg-mint px-4 py-2 text-sm font-semibold text-black shadow-[0_0_30px_-6px_var(--mint)] transition hover:brightness-110"
-        >
-          Audit a bill
-        </Link>
+        <div className="flex items-center gap-2.5">
+          <AccountMenu />
+          <Link
+            href="/audit"
+            className="rounded-xl bg-mint px-4 py-2 text-sm font-semibold text-black shadow-[0_0_30px_-6px_var(--mint)] transition hover:brightness-110"
+          >
+            Audit a bill
+          </Link>
+        </div>
       </nav>
     </header>
   );
